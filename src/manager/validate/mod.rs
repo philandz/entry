@@ -11,7 +11,9 @@ pub fn user_id_from_metadata(meta: &tonic::metadata::MetadataMap) -> Result<Stri
 
 pub fn non_empty(field: &str, value: &str) -> Result<(), Status> {
     if value.trim().is_empty() {
-        return Err(Status::invalid_argument(format!("{field} must not be empty")));
+        return Err(Status::invalid_argument(format!(
+            "{field} must not be empty"
+        )));
     }
     Ok(())
 }
