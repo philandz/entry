@@ -24,6 +24,7 @@ pub struct DbEntry {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub deleted_at: Option<i64>,
     // computed
     pub has_attachment: Option<bool>,
 }
@@ -36,6 +37,7 @@ pub struct DbComment {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub deleted_at: Option<i64>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -77,7 +79,7 @@ pub fn map_entry(db: DbEntry) -> Entry {
             id: db.id,
             created_at: db.created_at,
             updated_at: db.updated_at,
-            deleted_at: 0,
+            deleted_at: db.deleted_at.unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
@@ -112,7 +114,7 @@ pub fn map_comment(db: DbComment) -> Comment {
             id: db.id,
             created_at: db.created_at,
             updated_at: db.updated_at,
-            deleted_at: 0,
+            deleted_at: db.deleted_at.unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
