@@ -16,26 +16,18 @@ async fn main() -> anyhow::Result<()> {
     let app_info = philand_application::from_env_with_prefix("ENTRY_APP");
     tracing::info!("starting {}", app_info.user_agent());
 
-    let database_url =
-        std::env::var("DATABASE_URL").map_err(|_| anyhow::anyhow!("DATABASE_URL not set"))?;
+    let database_url = std::env::var("DATABASE_URL").map_err(|_| anyhow::anyhow!("DATABASE_URL not set"))?;
     let grpc_host = std::env::var("GRPC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let grpc_port: u16 = std::env::var("GRPC_PORT")
-        .unwrap_or_else(|_| "50105".to_string())
-        .parse()?;
+    let grpc_port: u16 = std::env::var("GRPC_PORT").unwrap_or_else(|_| "50105".to_string()).parse()?;
     let http_host = std::env::var("HTTP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let http_port: u16 = std::env::var("HTTP_PORT")
-        .unwrap_or_else(|_| "9105".to_string())
-        .parse()?;
-    let budget_url =
-        std::env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
+    let http_port: u16 = std::env::var("HTTP_PORT").unwrap_or_else(|_| "9105".to_string()).parse()?;
+    let budget_url = std::env::var("BUDGET_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50103".to_string());
 
-    let repo = EntryRepository::new(&database_url)
-        .await
+    let repo = EntryRepository::new(&database_url).await
         .map_err(|e| anyhow::anyhow!("Failed to init repository: {e}"))?;
     tracing::info!("Storage initialized");
 
-    let budget_client = BudgetClient::connect(&budget_url)
-        .await
+    let budget_client = BudgetClient::connect(&budget_url).await
         .map_err(|e| anyhow::anyhow!("Failed to connect to budget gRPC: {e}"))?;
     tracing::info!("Budget gRPC client connected to {}", budget_url);
 
