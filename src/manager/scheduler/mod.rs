@@ -1,3 +1,4 @@
+use chrono::Datelike;
 /// Recurring entry scheduler — runs as a background tokio task.
 ///
 /// Every hour it queries `budget_entries` for rows where:
@@ -10,11 +11,9 @@
 ///
 /// RRULE parsing is intentionally minimal for v1 — only FREQ + INTERVAL are
 /// supported (DAILY / WEEKLY / MONTHLY / YEARLY).
-
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
 use tracing::{error, info};
-use chrono::Datelike;
 
 use crate::converters::kind_from_db;
 use crate::manager::repository::EntryRepository;
@@ -31,23 +30,23 @@ pub fn next_occurrence(current: &str, rrule: &str) -> Option<String> {
     for part in rrule.split(';') {
         let mut kv = part.splitn(2, '=');
         match (kv.next(), kv.next()) {
-            (Some("FREQ"),     Some(v)) => freq = v,
+            (Some("FREQ"), Some(v)) => freq = v,
             (Some("INTERVAL"), Some(v)) => interval = v.parse().unwrap_or(1),
             _ => {}
         }
     }
 
     let next = match freq {
-        "DAILY"   => date + chrono::Duration::days(interval),
-        "WEEKLY"  => date + chrono::Duration::weeks(interval),
+        "DAILY" => date + chrono::Duration::days(interval),
+        "WEEKLY" => date + chrono::Duration::weeks(interval),
         "MONTHLY" => {
             let months = date.month() as i64 + interval;
-            let year   = date.year() + ((months - 1) / 12) as i32;
-            let month  = ((months - 1) % 12 + 1) as u32;
-            let day    = date.day().min(days_in_month(year, month));
+            let year = date.year() + ((months - 1) / 12) as i32;
+            let month = ((months - 1) % 12 + 1) as u32;
+            let day = date.day().min(days_in_month(year, month));
             NaiveDate::from_ymd_opt(year, month, day)?
         }
-        "YEARLY"  => {
+        "YEARLY" => {
             NaiveDate::from_ymd_opt(date.year() + interval as i32, date.month(), date.day())?
         }
         _ => return None,
@@ -57,8 +56,11 @@ pub fn next_occurrence(current: &str, rrule: &str) -> Option<String> {
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
-    let next_month = if month == 12 { chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1) }
-                     else           { chrono::NaiveDate::from_ymd_opt(year, month + 1, 1) };
+    let next_month = if month == 12 {
+        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
+    };
     next_month
         .and_then(|d| d.pred_opt())
         .map(|d| d.day())
@@ -79,22 +81,28 @@ async fn tick(repo: &EntryRepository) -> anyhow::Result<()> {
     let today = {
         use chrono::FixedOffset;
         let tz = FixedOffset::east_opt(7 * 3600).unwrap();
-        chrono::Utc::now().with_timezone(&tz).format("%Y-%m-%d").to_string()
+        chrono::Utc::now()
+            .with_timezone(&tz)
+            .format("%Y-%m-%d")
+            .to_string()
     };
 
     let due = repo.list_due_recurring(&today).await?;
-    if due.is_empty() { return Ok(()); }
+    if due.is_empty() {
+        return Ok(());
+    }
 
     info!("Recurring scheduler: {} entries due on {today}", due.len());
 
     for template in due {
         let rule = match &template.recurrence_rule {
             Some(r) => r.clone(),
-            None    => continue,
+            None => continue,
         };
 
         let kind = kind_from_db(&template.kind);
-        let tags: Vec<String> = template.tags
+        let tags: Vec<String> = template
+            .tags
             .as_deref()
             .unwrap_or("")
             .split(',')
@@ -103,19 +111,25 @@ async fn tick(repo: &EntryRepository) -> anyhow::Result<()> {
             .collect();
 
         // Create the new occurrence
-        match repo.create_entry(
-            &template.budget_id,
-            template.category_id.as_deref(),
-            kind,
-            template.amount,
-            &template.description,
-            &today,
-            &tags,
-            template.notes.as_deref(),
-            &template.created_by,
-        ).await {
+        match repo
+            .create_entry(
+                &template.budget_id,
+                template.category_id.as_deref(),
+                kind,
+                template.amount,
+                &template.description,
+                &today,
+                &tags,
+                template.notes.as_deref(),
+                &template.created_by,
+            )
+            .await
+        {
             Ok(new_entry) => {
-                info!("Spawned recurring entry {} from template {}", new_entry.id, template.id);
+                info!(
+                    "Spawned recurring entry {} from template {}",
+                    new_entry.id, template.id
+                );
             }
             Err(e) => {
                 error!("Failed to spawn recurring entry from {}: {e}", template.id);
