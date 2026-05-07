@@ -109,7 +109,7 @@ impl EntryRepository {
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
-                    e.created_by, e.created_at, e.updated_at,
+                    e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM budget_entries e
              WHERE e.id = ? AND e.deleted_at IS NULL"
@@ -217,7 +217,7 @@ impl EntryRepository {
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
-                    e.created_by, e.created_at, e.updated_at,
+                    e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM budget_entries e {where_clause}
              ORDER BY {sort_col} {sort_dir}
@@ -462,7 +462,7 @@ impl EntryRepository {
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
-                    e.created_by, e.created_at, e.updated_at,
+                    e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     0 AS has_attachment
              FROM budget_entries e
              WHERE e.is_recurring = TRUE
@@ -499,7 +499,7 @@ impl EntryRepository {
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
-                    e.created_by, e.created_at, e.updated_at,
+                    e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM budget_entries e
              WHERE e.split_group_id = ? AND e.deleted_at IS NULL
