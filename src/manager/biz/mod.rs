@@ -68,6 +68,7 @@ impl EntryBiz {
     // Entry CRUD
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_entry(
         &self,
         user_id: &str,
@@ -103,6 +104,7 @@ impl EntryBiz {
     // Recurring entries
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_recurring_entry(
         &self,
         user_id: &str,
@@ -170,6 +172,7 @@ impl EntryBiz {
     // Split entries
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_split_entry(
         &self,
         user_id: &str,
@@ -304,6 +307,7 @@ impl EntryBiz {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_entry(
         &self,
         user_id: &str,

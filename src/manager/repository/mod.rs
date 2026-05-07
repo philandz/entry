@@ -32,6 +32,7 @@ impl EntryRepository {
     // Entry CRUD
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_entry(
         &self,
         budget_id: &str,
@@ -61,6 +62,7 @@ impl EntryRepository {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_entry_full(
         &self,
         budget_id: &str,
@@ -240,6 +242,7 @@ impl EntryRepository {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_entry(
         &self,
         entry_id: &str,
