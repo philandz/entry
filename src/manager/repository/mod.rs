@@ -348,7 +348,7 @@ impl EntryRepository {
 
     pub async fn get_comment(&self, comment_id: &str) -> Result<DbComment> {
         let row = sqlx::query_as::<_, DbComment>(
-            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at FROM entry_comments WHERE id = ? AND deleted_at IS NULL"
+            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at, deleted_at FROM entry_comments WHERE id = ? AND deleted_at IS NULL"
         ).bind(comment_id).fetch_one(&self.pool).await?;
         Ok(row)
     }
@@ -374,7 +374,7 @@ impl EntryRepository {
 
     pub async fn list_comments(&self, entry_id: &str) -> Result<Vec<DbComment>> {
         let rows = sqlx::query_as::<_, DbComment>(
-            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at FROM entry_comments WHERE entry_id = ? AND deleted_at IS NULL ORDER BY created_at ASC"
+            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at, deleted_at FROM entry_comments WHERE entry_id = ? AND deleted_at IS NULL ORDER BY created_at ASC"
         ).bind(entry_id).fetch_all(&self.pool).await?;
         Ok(rows)
     }
@@ -421,7 +421,7 @@ impl EntryRepository {
 
     pub async fn list_attachments(&self, entry_id: &str) -> Result<Vec<DbAttachment>> {
         let rows = sqlx::query_as::<_, DbAttachment>(
-            "SELECT id, entry_id, file_id, file_name, created_by, created_at FROM entry_attachments WHERE entry_id = ? ORDER BY created_at ASC"
+            "SELECT id, entry_id, file_id, file_name, user_id, created_at FROM entry_attachments WHERE entry_id = ? ORDER BY created_at ASC"
         ).bind(entry_id).fetch_all(&self.pool).await?;
         Ok(rows)
     }
