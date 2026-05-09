@@ -1,5 +1,5 @@
 use anyhow::Result;
-use philand_time::now_unix;
+use chrono::Utc;
 use sqlx::MySqlPool;
 
 use crate::converters::{kind_to_db, DbAttachment, DbComment, DbEntry};
@@ -79,7 +79,7 @@ impl EntryRepository {
         split_total: Option<i64>,
     ) -> Result<DbEntry> {
         let id = new_id();
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         let tags_str = tags.join(",");
         let is_recurring = recurrence_rule.is_some();
         // Compute next_occurrence from entry_date + rule (simple: same as entry_date for first insert)
@@ -89,7 +89,7 @@ impl EntryRepository {
             None
         };
         sqlx::query(
-            "INSERT INTO budget_entries (id, budget_id, category_id, kind, amount, description, entry_date, tags, notes, is_recurring, recurrence_rule, next_occurrence, split_group_id, split_total, created_by, created_at, updated_at)
+            "INSERT INTO entries (id, budget_id, category_id, kind, amount_minor, description, entry_date, tags, notes, is_recurring, recurrence_rule, next_occurrence, split_group_id, split_total, created_by, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id).bind(budget_id).bind(category_id).bind(kind_to_db(kind))
@@ -104,14 +104,14 @@ impl EntryRepository {
 
     pub async fn get_entry(&self, entry_id: &str) -> Result<DbEntry> {
         let row = sqlx::query_as::<_, DbEntry>(
-            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount, e.description,
+            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
-             FROM budget_entries e
+             FROM entries e
              WHERE e.id = ? AND e.deleted_at IS NULL"
         )
         .bind(entry_id)
@@ -178,17 +178,17 @@ impl EntryRepository {
             }
         }
         if let Some(min) = params.amount_min {
-            conditions.push("e.amount >= ?".to_string());
+            conditions.push("e.amount_minor >= ?".to_string());
             binds.push(min.to_string());
         }
         if let Some(max) = params.amount_max {
-            conditions.push("e.amount <= ?".to_string());
+            conditions.push("e.amount_minor <= ?".to_string());
             binds.push(max.to_string());
         }
 
         let where_clause = format!("WHERE {}", conditions.join(" AND "));
         let sort_col = match params.sort_by.as_deref() {
-            Some("amount") => "e.amount",
+            Some("amount") => "e.amount_minor",
             Some("description") => "e.description",
             _ => "e.entry_date",
         };
@@ -199,7 +199,7 @@ impl EntryRepository {
         };
 
         // Count
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM budget_entries e {where_clause}");
+        let count_sql = format!("SELECT COUNT(*) as cnt FROM entries e {where_clause}");
         let mut count_q = sqlx::query(&count_sql);
         for b in &binds {
             count_q = count_q.bind(b);
@@ -212,14 +212,14 @@ impl EntryRepository {
 
         // Data
         let data_sql = format!(
-            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount, e.description,
+            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
-             FROM budget_entries e {where_clause}
+             FROM entries e {where_clause}
              ORDER BY {sort_col} {sort_dir}
              LIMIT ? OFFSET ?"
         );
@@ -254,7 +254,7 @@ impl EntryRepository {
         tags: Option<&[String]>,
         notes: Option<&str>,
     ) -> Result<DbEntry> {
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         let mut parts: Vec<String> = vec!["updated_at = ?".to_string()];
         if category_id.is_some() {
             parts.push("category_id = ?".to_string());
@@ -263,7 +263,7 @@ impl EntryRepository {
             parts.push("kind = ?".to_string());
         }
         if amount.is_some() {
-            parts.push("amount = ?".to_string());
+            parts.push("amount_minor = ?".to_string());
         }
         if description.is_some() {
             parts.push("description = ?".to_string());
@@ -278,7 +278,7 @@ impl EntryRepository {
             parts.push("notes = ?".to_string());
         }
         let sql = format!(
-            "UPDATE budget_entries SET {} WHERE id = ? AND deleted_at IS NULL",
+            "UPDATE entries SET {} WHERE id = ? AND deleted_at IS NULL",
             parts.join(", ")
         );
         let mut q = sqlx::query(&sql).bind(now);
@@ -308,8 +308,8 @@ impl EntryRepository {
     }
 
     pub async fn delete_entry(&self, entry_id: &str) -> Result<()> {
-        let now = now_unix();
-        sqlx::query("UPDATE budget_entries SET deleted_at = ?, updated_at = ? WHERE id = ?")
+        let now = Utc::now().naive_utc();
+        sqlx::query("UPDATE entries SET deleted_at = ?, updated_at = ? WHERE id = ?")
             .bind(now)
             .bind(now)
             .bind(entry_id)
@@ -320,7 +320,7 @@ impl EntryRepository {
 
     pub async fn get_entry_budget_id(&self, entry_id: &str) -> Result<Option<String>> {
         let row: Option<(String,)> = sqlx::query_as(
-            "SELECT budget_id FROM budget_entries WHERE id = ? AND deleted_at IS NULL",
+            "SELECT budget_id FROM entries WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(entry_id)
         .fetch_optional(&self.pool)
@@ -339,7 +339,7 @@ impl EntryRepository {
         created_by: &str,
     ) -> Result<DbComment> {
         let id = new_id();
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         sqlx::query("INSERT INTO entry_comments (id, entry_id, body, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&id).bind(entry_id).bind(body).bind(created_by).bind(now).bind(now)
             .execute(&self.pool).await?;
@@ -354,7 +354,7 @@ impl EntryRepository {
     }
 
     pub async fn edit_comment(&self, comment_id: &str, body: &str) -> Result<DbComment> {
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         sqlx::query("UPDATE entry_comments SET body = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
             .bind(body).bind(now).bind(comment_id)
             .execute(&self.pool).await?;
@@ -362,7 +362,7 @@ impl EntryRepository {
     }
 
     pub async fn delete_comment(&self, comment_id: &str) -> Result<()> {
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         sqlx::query("UPDATE entry_comments SET deleted_at = ?, updated_at = ? WHERE id = ?")
             .bind(now)
             .bind(now)
@@ -401,7 +401,7 @@ impl EntryRepository {
         created_by: &str,
     ) -> Result<DbAttachment> {
         let id = new_id();
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         sqlx::query("INSERT INTO entry_attachments (id, entry_id, file_id, file_name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&id).bind(entry_id).bind(file_id).bind(file_name).bind(created_by).bind(now)
             .execute(&self.pool).await?;
@@ -444,10 +444,10 @@ impl EntryRepository {
         entry_id: &str,
         rule: Option<&str>,
     ) -> Result<DbEntry> {
-        let now = now_unix();
+        let now = Utc::now().naive_utc();
         let is_recurring = rule.is_some();
         sqlx::query(
-            "UPDATE budget_entries SET recurrence_rule = ?, is_recurring = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+            "UPDATE entries SET recurrence_rule = ?, is_recurring = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
         )
         .bind(rule).bind(is_recurring).bind(now).bind(entry_id)
         .execute(&self.pool).await?;
@@ -457,14 +457,14 @@ impl EntryRepository {
     /// Returns all active recurring entries whose next_occurrence <= today
     pub async fn list_due_recurring(&self, today: &str) -> Result<Vec<DbEntry>> {
         let rows = sqlx::query_as::<_, DbEntry>(
-            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount, e.description,
+            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     0 AS has_attachment
-             FROM budget_entries e
+             FROM entries e
              WHERE e.is_recurring = TRUE
                AND e.recurrence_rule IS NOT NULL
                AND e.next_occurrence <= ?
@@ -478,8 +478,8 @@ impl EntryRepository {
 
     /// Advance next_occurrence after spawning a new entry
     pub async fn advance_next_occurrence(&self, entry_id: &str, next_date: &str) -> Result<()> {
-        let now = now_unix();
-        sqlx::query("UPDATE budget_entries SET next_occurrence = ?, updated_at = ? WHERE id = ?")
+        let now = Utc::now().naive_utc();
+        sqlx::query("UPDATE entries SET next_occurrence = ?, updated_at = ? WHERE id = ?")
             .bind(next_date)
             .bind(now)
             .bind(entry_id)
@@ -494,14 +494,14 @@ impl EntryRepository {
 
     pub async fn list_split_legs(&self, split_group_id: &str) -> Result<Vec<DbEntry>> {
         let rows = sqlx::query_as::<_, DbEntry>(
-            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount, e.description,
+            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
                     e.split_group_id, e.split_total,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
-             FROM budget_entries e
+             FROM entries e
              WHERE e.split_group_id = ? AND e.deleted_at IS NULL
              ORDER BY e.created_at ASC"
         )

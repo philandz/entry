@@ -1,5 +1,6 @@
 use crate::pb::common::base::Base;
 use crate::pb::service::entry::{Attachment, Comment, Entry, EntryKind};
+use chrono::NaiveDateTime;
 
 // ---------------------------------------------------------------------------
 // DB row structs
@@ -11,7 +12,7 @@ pub struct DbEntry {
     pub budget_id: String,
     pub category_id: Option<String>,
     pub kind: String,
-    pub amount: i64,
+    pub amount_minor: i64,
     pub description: String,
     pub entry_date: String,
     pub tags: Option<String>,
@@ -22,9 +23,9 @@ pub struct DbEntry {
     pub split_group_id: Option<String>,
     pub split_total: Option<i64>,
     pub created_by: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub deleted_at: Option<i64>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub deleted_at: Option<NaiveDateTime>,
     // computed
     pub has_attachment: Option<bool>,
 }
@@ -35,9 +36,9 @@ pub struct DbComment {
     pub entry_id: String,
     pub body: String,
     pub created_by: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub deleted_at: Option<i64>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub deleted_at: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -47,7 +48,7 @@ pub struct DbAttachment {
     pub file_id: String,
     pub file_name: String,
     pub created_by: String,
-    pub created_at: i64,
+    pub created_at: NaiveDateTime,
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +78,9 @@ pub fn map_entry(db: DbEntry) -> Entry {
     Entry {
         base: Some(Base {
             id: db.id,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-            deleted_at: db.deleted_at.unwrap_or(0),
+            created_at: db.created_at.and_utc().timestamp(),
+            updated_at: db.updated_at.and_utc().timestamp(),
+            deleted_at: db.deleted_at.map(|dt| dt.and_utc().timestamp()).unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
@@ -88,7 +89,7 @@ pub fn map_entry(db: DbEntry) -> Entry {
         budget_id: db.budget_id,
         category_id: db.category_id.unwrap_or_default(),
         kind: kind_from_db(&db.kind) as i32,
-        amount: db.amount,
+        amount: db.amount_minor,
         description: db.description,
         entry_date: db.entry_date,
         tags: db
@@ -112,9 +113,9 @@ pub fn map_comment(db: DbComment) -> Comment {
     Comment {
         base: Some(Base {
             id: db.id,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-            deleted_at: db.deleted_at.unwrap_or(0),
+            created_at: db.created_at.and_utc().timestamp(),
+            updated_at: db.updated_at.and_utc().timestamp(),
+            deleted_at: db.deleted_at.map(|dt| dt.and_utc().timestamp()).unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
@@ -129,7 +130,7 @@ pub fn map_attachment(db: DbAttachment) -> Attachment {
     Attachment {
         base: Some(Base {
             id: db.id,
-            created_at: db.created_at,
+            created_at: db.created_at.and_utc().timestamp(),
             updated_at: 0,
             deleted_at: 0,
             created_by: db.created_by,
