@@ -473,7 +473,7 @@ impl EntryBiz {
             .get_comment(comment_id)
             .await
             .map_err(|_| Status::not_found("Comment not found"))?;
-        if db.created_by != user_id {
+        if db.user_id != user_id {
             return Err(Status::permission_denied("Can only edit your own comments"));
         }
         let updated = self
@@ -490,7 +490,7 @@ impl EntryBiz {
             .get_comment(comment_id)
             .await
             .map_err(|_| Status::not_found("Comment not found"))?;
-        if db.created_by != user_id {
+        if db.user_id != user_id {
             return Err(Status::permission_denied(
                 "Can only delete your own comments",
             ));

@@ -340,7 +340,7 @@ impl EntryRepository {
     ) -> Result<DbComment> {
         let id = new_id();
         let now = Utc::now().naive_utc();
-        sqlx::query("INSERT INTO entry_comments (id, entry_id, body, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO entry_comments (id, entry_id, comment_text, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&id).bind(entry_id).bind(body).bind(created_by).bind(now).bind(now)
             .execute(&self.pool).await?;
         self.get_comment(&id).await
@@ -348,14 +348,14 @@ impl EntryRepository {
 
     pub async fn get_comment(&self, comment_id: &str) -> Result<DbComment> {
         let row = sqlx::query_as::<_, DbComment>(
-            "SELECT id, entry_id, body, created_by, created_at, updated_at FROM entry_comments WHERE id = ? AND deleted_at IS NULL"
+            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at FROM entry_comments WHERE id = ? AND deleted_at IS NULL"
         ).bind(comment_id).fetch_one(&self.pool).await?;
         Ok(row)
     }
 
     pub async fn edit_comment(&self, comment_id: &str, body: &str) -> Result<DbComment> {
         let now = Utc::now().naive_utc();
-        sqlx::query("UPDATE entry_comments SET body = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+        sqlx::query("UPDATE entry_comments SET comment_text = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
             .bind(body).bind(now).bind(comment_id)
             .execute(&self.pool).await?;
         self.get_comment(comment_id).await
@@ -374,7 +374,7 @@ impl EntryRepository {
 
     pub async fn list_comments(&self, entry_id: &str) -> Result<Vec<DbComment>> {
         let rows = sqlx::query_as::<_, DbComment>(
-            "SELECT id, entry_id, body, created_by, created_at, updated_at FROM entry_comments WHERE entry_id = ? AND deleted_at IS NULL ORDER BY created_at ASC"
+            "SELECT id, entry_id, comment_text, user_id, created_at, updated_at FROM entry_comments WHERE entry_id = ? AND deleted_at IS NULL ORDER BY created_at ASC"
         ).bind(entry_id).fetch_all(&self.pool).await?;
         Ok(rows)
     }
@@ -402,11 +402,11 @@ impl EntryRepository {
     ) -> Result<DbAttachment> {
         let id = new_id();
         let now = Utc::now().naive_utc();
-        sqlx::query("INSERT INTO entry_attachments (id, entry_id, file_id, file_name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO entry_attachments (id, entry_id, file_id, file_name, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&id).bind(entry_id).bind(file_id).bind(file_name).bind(created_by).bind(now)
             .execute(&self.pool).await?;
         let row = sqlx::query_as::<_, DbAttachment>(
-            "SELECT id, entry_id, file_id, file_name, created_by, created_at FROM entry_attachments WHERE id = ?"
+            "SELECT id, entry_id, file_id, file_name, user_id, created_at FROM entry_attachments WHERE id = ?"
         ).bind(&id).fetch_one(&self.pool).await?;
         Ok(row)
     }

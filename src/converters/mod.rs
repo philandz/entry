@@ -34,8 +34,8 @@ pub struct DbEntry {
 pub struct DbComment {
     pub id: String,
     pub entry_id: String,
-    pub body: String,
-    pub created_by: String,
+    pub comment_text: String,
+    pub user_id: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub deleted_at: Option<NaiveDateTime>,
@@ -47,7 +47,7 @@ pub struct DbAttachment {
     pub entry_id: String,
     pub file_id: String,
     pub file_name: String,
-    pub created_by: String,
+    pub user_id: String,
     pub created_at: NaiveDateTime,
 }
 
@@ -116,13 +116,13 @@ pub fn map_comment(db: DbComment) -> Comment {
             created_at: db.created_at.and_utc().timestamp(),
             updated_at: db.updated_at.and_utc().timestamp(),
             deleted_at: db.deleted_at.map(|dt| dt.and_utc().timestamp()).unwrap_or(0),
-            created_by: db.created_by,
+            created_by: db.user_id,
             updated_by: String::new(),
             owner_id: String::new(),
             status: 0,
         }),
         entry_id: db.entry_id,
-        body: db.body,
+        body: db.comment_text,
     }
 }
 
@@ -133,7 +133,7 @@ pub fn map_attachment(db: DbAttachment) -> Attachment {
             created_at: db.created_at.and_utc().timestamp(),
             updated_at: 0,
             deleted_at: 0,
-            created_by: db.created_by,
+            created_by: db.user_id,
             updated_by: String::new(),
             owner_id: String::new(),
             status: 0,
