@@ -1,7 +1,7 @@
 use chrono::Datelike;
 /// Recurring entry scheduler — runs as a background tokio task.
 ///
-/// Every hour it queries `budget_entries` for rows where:
+/// Every hour it queries `entries` for rows where:
 ///   - `is_recurring = TRUE`
 ///   - `next_occurrence <= today (UTC+7)`
 ///
@@ -116,7 +116,7 @@ async fn tick(repo: &EntryRepository) -> anyhow::Result<()> {
                 &template.budget_id,
                 template.category_id.as_deref(),
                 kind,
-                template.amount,
+                template.amount_minor,
                 &template.description,
                 &today,
                 &tags,

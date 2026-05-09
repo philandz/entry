@@ -22,26 +22,23 @@ enum EntryKind {
 // ---------------------------------------------------------------------------
 
 message Entry {
-  string    id             = 1;
-  string    budget_id      = 2;
-  string    category_id    = 3;
-  EntryKind kind           = 4;
-  int64     amount         = 5;
-  string    description    = 6;
-  string    entry_date     = 7;   // YYYY-MM-DD
-  repeated string tags     = 8;
-  string    notes          = 9;
-  bool      is_recurring   = 10;
-  bool      has_attachment = 11;
-  string    created_by     = 12;
-  int64     created_at     = 13;
-  int64     updated_at     = 14;
+  common.base.Base base         = 1;
+  string           budget_id    = 2;
+  string           category_id  = 3;
+  EntryKind        kind         = 4;
+  int64            amount       = 5;
+  string           description  = 6;
+  string           entry_date   = 7;   // YYYY-MM-DD
+  repeated string  tags        = 8;
+  string           notes       = 9;
+  bool             is_recurring = 10;
+  bool             has_attachment = 11;
   // Recurring
-  optional string recurrence_rule = 15;  // RRULE string e.g. "FREQ=MONTHLY;INTERVAL=1"
-  optional string next_occurrence  = 16; // YYYY-MM-DD of next scheduled entry
+  optional string  recurrence_rule = 15;  // RRULE string e.g. "FREQ=MONTHLY;INTERVAL=1"
+  optional string  next_occurrence = 16; // YYYY-MM-DD of next scheduled entry
   // Split
-  optional string split_group_id  = 17;  // UUID linking split legs together
-  optional int64  split_total     = 18;  // total amount of the split group
+  optional string  split_group_id  = 17;  // UUID linking split legs together
+  optional int64   split_total     = 18;  // total amount of the split group
 }
 
 message Comment {
