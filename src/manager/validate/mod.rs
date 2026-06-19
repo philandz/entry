@@ -2,11 +2,23 @@
 use tonic::Status;
 
 pub fn user_id_from_metadata(meta: &tonic::metadata::MetadataMap) -> Result<String, Status> {
-    meta.get("x-user-id")
+    tracing::debug!("entry validate: metadata keys: {:?}", meta.keys().collect::<Vec<_>>());
+    let x_user_id = meta.get("x-user-id");
+    tracing::debug!("entry validate: x-user-id value: {:?}", x_user_id);
+    x_user_id
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| Status::unauthenticated("missing x-user-id metadata"))
+        .ok_or_else(|| {
+            tracing::warn!("entry validate: x-user-id not found or empty in metadata");
+            Status::unauthenticated("missing x-user-id metadata")
+        })
+}
+
+pub fn user_type_from_metadata(meta: &tonic::metadata::MetadataMap) -> Option<String> {
+    meta.get("x-user-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }
 
 pub fn non_empty(field: &str, value: &str) -> Result<(), Status> {
