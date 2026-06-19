@@ -36,23 +36,23 @@ impl EntryBiz {
         Status::internal(e.to_string())
     }
 
-    async fn check_role(&self, user_id: &str, budget_id: &str) -> Result<BudgetRole, Status> {
+    async fn check_role(&self, user_id: &str, budget_id: &str, user_type: Option<&str>) -> Result<BudgetRole, Status> {
         self.budget_client
             .lock()
             .await
-            .check_role(user_id, budget_id)
+            .check_role(user_id, budget_id, user_type)
             .await
     }
 
-    async fn assert_member(&self, budget_id: &str, user_id: &str) -> Result<(), Status> {
-        if self.check_role(user_id, budget_id).await? == BudgetRole::Unspecified {
+    async fn assert_member(&self, budget_id: &str, user_id: &str, user_type: Option<&str>) -> Result<(), Status> {
+        if self.check_role(user_id, budget_id, user_type).await? == BudgetRole::Unspecified {
             return Err(Status::permission_denied("Not a member of this budget"));
         }
         Ok(())
     }
 
-    async fn assert_contributor(&self, budget_id: &str, user_id: &str) -> Result<(), Status> {
-        let role = self.check_role(user_id, budget_id).await?;
+    async fn assert_contributor(&self, budget_id: &str, user_id: &str, user_type: Option<&str>) -> Result<(), Status> {
+        let role = self.check_role(user_id, budget_id, user_type).await?;
         if !matches!(
             role,
             BudgetRole::Owner | BudgetRole::Manager | BudgetRole::Contributor
@@ -80,8 +80,9 @@ impl EntryBiz {
         entry_date: &str,
         tags: &[String],
         notes: Option<&str>,
+        user_type: Option<&str>,
     ) -> Result<Entry, Status> {
-        self.assert_contributor(budget_id, user_id).await?;
+        self.assert_contributor(budget_id, user_id, user_type).await?;
         let db = self
             .repo
             .create_entry(
@@ -121,7 +122,7 @@ impl EntryBiz {
         if recurrence_rule.is_empty() {
             return Err(Status::invalid_argument("recurrence_rule is required"));
         }
-        self.assert_contributor(budget_id, user_id).await?;
+        self.assert_contributor(budget_id, user_id, None).await?;
         let db = self
             .repo
             .create_entry_full(
@@ -155,7 +156,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_contributor(&budget_id, user_id).await?;
+        self.assert_contributor(&budget_id, user_id, None).await?;
         let db = self
             .repo
             .update_recurrence_rule(entry_id, rule)
@@ -194,7 +195,7 @@ impl EntryBiz {
                 "Legs sum ({legs_sum}) must equal total_amount ({total_amount})"
             )));
         }
-        self.assert_contributor(budget_id, user_id).await?;
+        self.assert_contributor(budget_id, user_id, None).await?;
 
         let split_group_id = uuid::Uuid::new_v4().to_string();
         let mut created_legs = Vec::with_capacity(legs.len());
@@ -256,7 +257,7 @@ impl EntryBiz {
             .split_group_id
             .clone()
             .ok_or_else(|| Status::invalid_argument("Entry is not part of a split"))?;
-        self.assert_member(&db_entry.budget_id, user_id).await?;
+        self.assert_member(&db_entry.budget_id, user_id, None).await?;
         let legs = self
             .repo
             .list_split_legs(&split_group_id)
@@ -271,7 +272,7 @@ impl EntryBiz {
             .get_entry(entry_id)
             .await
             .map_err(|_| Status::not_found("Entry not found"))?;
-        self.assert_member(&db.budget_id, user_id).await?;
+        self.assert_member(&db.budget_id, user_id, None).await?;
         Ok(map_entry(db))
     }
 
@@ -281,9 +282,10 @@ impl EntryBiz {
         budget_id: Option<&str>,
         budget_ids: &[String],
         params: &ListParams,
+        user_type: Option<&str>,
     ) -> Result<(Vec<Entry>, PageMeta), Status> {
         if let Some(bid) = budget_id {
-            self.assert_member(bid, user_id).await?;
+            self.assert_member(bid, user_id, user_type).await?;
             let result = self
                 .repo
                 .list_entries(Some(bid), &[], None, params)
@@ -294,7 +296,6 @@ impl EntryBiz {
                 result.meta,
             ))
         } else {
-            // Cross-budget listing: budget_ids come from the authenticated frontend (trusted)
             let result = self
                 .repo
                 .list_entries(None, budget_ids, Some(user_id), params)
@@ -326,7 +327,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_contributor(&budget_id, user_id).await?;
+        self.assert_contributor(&budget_id, user_id, None).await?;
         let db = self
             .repo
             .update_entry(
@@ -351,7 +352,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_contributor(&budget_id, user_id).await?;
+        self.assert_contributor(&budget_id, user_id, None).await?;
         self.repo
             .delete_entry(entry_id)
             .await
@@ -368,7 +369,7 @@ impl EntryBiz {
         budget_id: &str,
         rows: Vec<BulkImportRow>,
     ) -> Result<BulkImportEntriesResponse, Status> {
-        self.assert_contributor(budget_id, user_id).await?;
+        self.assert_contributor(budget_id, user_id, None).await?;
         let mut results = Vec::with_capacity(rows.len());
         let mut imported = 0i32;
         let mut errors = 0i32;
@@ -453,7 +454,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_member(&budget_id, user_id).await?;
+        self.assert_member(&budget_id, user_id, None).await?;
         let db = self
             .repo
             .add_comment(entry_id, body, user_id)
@@ -512,7 +513,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_member(&budget_id, user_id).await?;
+        self.assert_member(&budget_id, user_id, None).await?;
         let rows = self
             .repo
             .list_comments(entry_id)
@@ -538,7 +539,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_contributor(&budget_id, user_id).await?;
+        self.assert_contributor(&budget_id, user_id, None).await?;
         let db = self
             .repo
             .attach_file(entry_id, file_id, file_name, user_id)
@@ -564,7 +565,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_contributor(&budget_id, user_id).await?;
+        self.assert_contributor(&budget_id, user_id, None).await?;
         self.repo
             .remove_attachment(attachment_id)
             .await
@@ -582,7 +583,7 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
-        self.assert_member(&budget_id, user_id).await?;
+        self.assert_member(&budget_id, user_id, None).await?;
         let rows = self
             .repo
             .list_attachments(entry_id)
