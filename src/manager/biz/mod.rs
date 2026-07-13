@@ -36,7 +36,12 @@ impl EntryBiz {
         Status::internal(e.to_string())
     }
 
-    async fn check_role(&self, user_id: &str, budget_id: &str, user_type: Option<&str>) -> Result<BudgetRole, Status> {
+    async fn check_role(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<BudgetRole, Status> {
         self.budget_client
             .lock()
             .await
@@ -44,14 +49,24 @@ impl EntryBiz {
             .await
     }
 
-    async fn assert_member(&self, budget_id: &str, user_id: &str, user_type: Option<&str>) -> Result<(), Status> {
+    async fn assert_member(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         if self.check_role(user_id, budget_id, user_type).await? == BudgetRole::Unspecified {
             return Err(Status::permission_denied("Not a member of this budget"));
         }
         Ok(())
     }
 
-    async fn assert_contributor(&self, budget_id: &str, user_id: &str, user_type: Option<&str>) -> Result<(), Status> {
+    async fn assert_contributor(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         let role = self.check_role(user_id, budget_id, user_type).await?;
         if !matches!(
             role,
@@ -82,7 +97,8 @@ impl EntryBiz {
         notes: Option<&str>,
         user_type: Option<&str>,
     ) -> Result<Entry, Status> {
-        self.assert_contributor(budget_id, user_id, user_type).await?;
+        self.assert_contributor(budget_id, user_id, user_type)
+            .await?;
         let db = self
             .repo
             .create_entry(
@@ -257,7 +273,8 @@ impl EntryBiz {
             .split_group_id
             .clone()
             .ok_or_else(|| Status::invalid_argument("Entry is not part of a split"))?;
-        self.assert_member(&db_entry.budget_id, user_id, None).await?;
+        self.assert_member(&db_entry.budget_id, user_id, None)
+            .await?;
         let legs = self
             .repo
             .list_split_legs(&split_group_id)
@@ -296,6 +313,13 @@ impl EntryBiz {
                 result.meta,
             ))
         } else {
+            // Cross-budget path: when member_ids are provided, validate that the user
+            // is a member of each requested budget to prevent cross-budget data leakage.
+            if !params.member_ids.is_empty() {
+                for mid in &params.member_ids {
+                    self.assert_member(mid, user_id, user_type).await?;
+                }
+            }
             let result = self
                 .repo
                 .list_entries(None, budget_ids, Some(user_id), params)

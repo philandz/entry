@@ -107,14 +107,37 @@ impl EntryService for EntryHandler {
     ) -> Result<Response<ListEntriesResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
         let user_type = validate::user_type_from_metadata(request.metadata());
-        tracing::debug!("list_entries handler: user_id={}, user_type={:?}", user_id, user_type);
+        tracing::debug!(
+            "list_entries handler: user_id={}, user_type={:?}",
+            user_id,
+            user_type
+        );
         let req = request.into_inner();
         let default_params = crate::pb::service::entry::ListParams::default();
         let params = req.params.as_ref().unwrap_or(&default_params);
         let budget_id = req.budget_id.as_deref().filter(|s| !s.is_empty());
+
+        validate::date_range(
+            params.date_from.as_deref().unwrap_or(""),
+            params.date_to.as_deref().unwrap_or(""),
+        )?;
+        validate::range_max_days(
+            params.date_from.as_deref().unwrap_or(""),
+            params.date_to.as_deref().unwrap_or(""),
+            30,
+        )?;
+        validate::repeated_ids(&params.category_ids, "category_ids", 50)?;
+        validate::repeated_ids(&params.member_ids, "member_ids", 50)?;
+
         let (entries, meta) = self
             .biz
-            .list_entries(&user_id, budget_id, &req.budget_ids, params, user_type.as_deref())
+            .list_entries(
+                &user_id,
+                budget_id,
+                &req.budget_ids,
+                params,
+                user_type.as_deref(),
+            )
             .await?;
         Ok(Response::new(ListEntriesResponse {
             entries,
