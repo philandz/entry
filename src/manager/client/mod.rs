@@ -26,7 +26,12 @@ impl BudgetClient {
         budget_id: &str,
         user_type: Option<&str>,
     ) -> Result<BudgetRole, Status> {
-        tracing::debug!("BudgetClient.check_role: user_id={}, budget_id={}, user_type={:?}", user_id, budget_id, user_type);
+        tracing::debug!(
+            "BudgetClient.check_role: user_id={}, budget_id={}, user_type={:?}",
+            user_id,
+            budget_id,
+            user_type
+        );
         let mut req = Request::new(CheckRoleRequest {
             user_id: user_id.to_string(),
             budget_id: budget_id.to_string(),
