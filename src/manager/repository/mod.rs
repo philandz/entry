@@ -18,13 +18,219 @@ pub struct ListResult {
     pub meta: PageMeta,
 }
 
+/// A bind variable for dynamic query conditions — stored as String for sqlx query building.
+pub type SqlBind = String;
+
+// ---------------------------------------------------------------------------
+// EntryQueryBuilder
+// ---------------------------------------------------------------------------
+
+pub struct EntryQueryBuilder<'a> {
+    conditions: Vec<String>,
+    binds: Vec<SqlBind>,
+    params: &'a ListParams,
+}
+
+impl<'a> EntryQueryBuilder<'a> {
+    pub fn new(params: &'a ListParams) -> Self {
+        Self {
+            conditions: vec!["e.deleted_at IS NULL".to_string()],
+            binds: Vec::new(),
+            params,
+        }
+    }
+
+    pub fn apply_budget(
+        mut self,
+        bid: Option<&str>,
+        bids: &[String],
+        creator: Option<&str>,
+    ) -> Self {
+        if let Some(b) = bid {
+            self.conditions.push("e.budget_id = ?".to_string());
+            self.binds.push(b.to_string());
+        } else if !bids.is_empty() {
+            let placeholders = bids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            self.conditions
+                .push(format!("e.budget_id IN ({placeholders})"));
+            for id in bids {
+                self.binds.push(id.clone());
+            }
+        } else if let Some(uid) = creator {
+            self.conditions.push("e.created_by = ?".to_string());
+            self.binds.push(uid.to_string());
+        }
+        self
+    }
+
+    pub fn apply_member(mut self) -> Self {
+        let member_ids = &self.params.member_ids;
+        if member_ids.is_empty() {
+            return self;
+        }
+        let placeholders = member_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        self.conditions.push(format!(
+            "e.budget_id IN (SELECT DISTINCT budget_id FROM budget_members \
+             WHERE user_id IN ({placeholders}) AND deleted_at IS NULL)"
+        ));
+        for id in member_ids {
+            self.binds.push(id.clone());
+        }
+        self
+    }
+
+    pub fn apply_text(mut self) -> Self {
+        if let Some(ref q) = self.params.q {
+            if !q.is_empty() {
+                self.conditions.push("e.description LIKE ?".to_string());
+                self.binds.push(format!("%{q}%"));
+            }
+        }
+        self
+    }
+
+    pub fn apply_kind(mut self) -> Self {
+        if let Some(ref kind) = self.params.kind {
+            if !kind.is_empty() {
+                self.conditions.push("e.kind = ?".to_string());
+                self.binds.push(kind.clone());
+            }
+        }
+        self
+    }
+
+    pub fn apply_category(mut self) -> Self {
+        // Precedence: singular category_id wins if present; else repeated category_ids.
+        let has_singular = self
+            .params
+            .category_id
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let has_plural = !self.params.category_ids.is_empty();
+        if has_singular {
+            self.conditions.push("e.category_id = ?".to_string());
+            self.binds.push(self.params.category_id.clone().unwrap());
+        } else if has_plural {
+            let placeholders = self
+                .params
+                .category_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",");
+            self.conditions
+                .push(format!("e.category_id IN ({placeholders})"));
+            for id in &self.params.category_ids {
+                self.binds.push(id.clone());
+            }
+        }
+        self
+    }
+
+    pub fn apply_date(mut self) -> Self {
+        if let Some(ref df) = self.params.date_from {
+            if !df.is_empty() {
+                self.conditions.push("e.entry_date >= ?".to_string());
+                self.binds.push(df.clone());
+            }
+        }
+        if let Some(ref dt) = self.params.date_to {
+            if !dt.is_empty() {
+                self.conditions.push("e.entry_date <= ?".to_string());
+                self.binds.push(dt.clone());
+            }
+        }
+        self
+    }
+
+    pub fn apply_amount(mut self) -> Self {
+        if let Some(min) = self.params.amount_min {
+            self.conditions.push("e.amount_minor >= ?".to_string());
+            self.binds.push(min.to_string());
+        }
+        if let Some(max) = self.params.amount_max {
+            self.conditions.push("e.amount_minor <= ?".to_string());
+            self.binds.push(max.to_string());
+        }
+        self
+    }
+
+    pub fn apply_tags(mut self) -> Self {
+        if let Some(ref tags) = self.params.tags {
+            if !tags.is_empty() {
+                self.conditions.push("e.tags LIKE ?".to_string());
+                self.binds.push(format!("%{tags}%"));
+            }
+        }
+        self
+    }
+
+    pub fn build_count(&self) -> (String, Vec<SqlBind>) {
+        let where_clause = format!("WHERE {}", self.conditions.join(" AND "));
+        let sql = format!("SELECT COUNT(*) as cnt FROM entries e {where_clause}");
+        (sql, self.binds.clone())
+    }
+
+    pub fn build_data(
+        &self,
+        sort_col: &str,
+        sort_dir: &str,
+        limit: i64,
+        offset: i64,
+    ) -> (String, Vec<SqlBind>) {
+        let where_clause = format!("WHERE {}", self.conditions.join(" AND "));
+        let sql = format!(
+            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description, \
+                    DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date, \
+                    e.tags, e.notes, e.is_recurring, e.recurrence_rule, \
+                    DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence, \
+                    e.split_group_id, e.split_total, \
+                    e.created_by, e.created_at, e.updated_at, e.deleted_at, \
+                    (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment \
+             FROM entries e {where_clause} \
+             ORDER BY {sort_col} {sort_dir} \
+             LIMIT ? OFFSET ?"
+        );
+        let mut binds = self.binds.clone();
+        binds.push(limit.to_string());
+        binds.push(offset.to_string());
+        (sql, binds)
+    }
+}
+
 impl EntryRepository {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::MySqlPool::connect(database_url).await?;
         let mut migrator =
             sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
-        migrator.run(&pool).await?;
+        if let Err(e) = migrator.run(&pool).await {
+            let err_str = format!("{}", e);
+            if err_str.contains("partially applied") {
+                tracing::warn!("Partial migration detected: {}", e);
+                if err_str.contains("20260507090228") {
+                    let has_avatar: bool = sqlx::query_scalar(
+                        "SELECT COUNT(*) > 0 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'avatar'"
+                    )
+                    .fetch_one(&pool)
+                    .await.unwrap_or(false);
+                    if has_avatar {
+                        sqlx::query(
+                            "INSERT IGNORE INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES (20260507090228, 'add_avatar_to_users', NOW(), true, 0x00, 0)"
+                        )
+                        .execute(&pool)
+                        .await.ok();
+                    }
+                }
+                sqlx::query("DELETE FROM _sqlx_migrations WHERE success = false")
+                    .execute(&pool)
+                    .await
+                    .ok();
+            } else {
+                return Err(anyhow::anyhow!("{}", e));
+            }
+        }
         Ok(Self { pool })
     }
 
@@ -130,63 +336,6 @@ impl EntryRepository {
         let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
         let offset = ((page - 1) * page_size) as i64;
 
-        let mut conditions = vec!["e.deleted_at IS NULL".to_string()];
-        let mut binds: Vec<String> = vec![];
-
-        if let Some(bid) = budget_id {
-            conditions.push("e.budget_id = ?".to_string());
-            binds.push(bid.to_string());
-        } else if !budget_ids.is_empty() {
-            let placeholders = budget_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            conditions.push(format!("e.budget_id IN ({placeholders})"));
-            for id in budget_ids {
-                binds.push(id.clone());
-            }
-        } else if let Some(uid) = user_id {
-            conditions.push("e.created_by = ?".to_string());
-            binds.push(uid.to_string());
-        }
-
-        if let Some(ref q) = params.q {
-            if !q.is_empty() {
-                conditions.push("e.description LIKE ?".to_string());
-                binds.push(format!("%{q}%"));
-            }
-        }
-        if let Some(ref kind) = params.kind {
-            if !kind.is_empty() {
-                conditions.push("e.kind = ?".to_string());
-                binds.push(kind.clone());
-            }
-        }
-        if let Some(ref cat) = params.category_id {
-            if !cat.is_empty() {
-                conditions.push("e.category_id = ?".to_string());
-                binds.push(cat.clone());
-            }
-        }
-        if let Some(ref df) = params.date_from {
-            if !df.is_empty() {
-                conditions.push("e.entry_date >= ?".to_string());
-                binds.push(df.clone());
-            }
-        }
-        if let Some(ref dt) = params.date_to {
-            if !dt.is_empty() {
-                conditions.push("e.entry_date <= ?".to_string());
-                binds.push(dt.clone());
-            }
-        }
-        if let Some(min) = params.amount_min {
-            conditions.push("e.amount_minor >= ?".to_string());
-            binds.push(min.to_string());
-        }
-        if let Some(max) = params.amount_max {
-            conditions.push("e.amount_minor <= ?".to_string());
-            binds.push(max.to_string());
-        }
-
-        let where_clause = format!("WHERE {}", conditions.join(" AND "));
         let sort_col = match params.sort_by.as_deref() {
             Some("amount") => "e.amount_minor",
             Some("description") => "e.description",
@@ -198,10 +347,20 @@ impl EntryRepository {
             "DESC"
         };
 
+        let qb = EntryQueryBuilder::new(params)
+            .apply_budget(budget_id, budget_ids, user_id)
+            .apply_member()
+            .apply_text()
+            .apply_kind()
+            .apply_category()
+            .apply_date()
+            .apply_amount()
+            .apply_tags();
+
         // Count
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM entries e {where_clause}");
+        let (count_sql, count_binds) = qb.build_count();
         let mut count_q = sqlx::query(&count_sql);
-        for b in &binds {
+        for b in &count_binds {
             count_q = count_q.bind(b);
         }
         let total: i64 = count_q
@@ -211,23 +370,11 @@ impl EntryRepository {
             .unwrap_or(0);
 
         // Data
-        let data_sql = format!(
-            "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
-                    DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
-                    e.tags, e.notes, e.is_recurring, e.recurrence_rule,
-                    DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
-                    e.created_by, e.created_at, e.updated_at, e.deleted_at,
-                    (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
-             FROM entries e {where_clause}
-             ORDER BY {sort_col} {sort_dir}
-             LIMIT ? OFFSET ?"
-        );
+        let (data_sql, data_binds) = qb.build_data(sort_col, sort_dir, page_size as i64, offset);
         let mut data_q = sqlx::query_as::<_, DbEntry>(&data_sql);
-        for b in &binds {
+        for b in &data_binds {
             data_q = data_q.bind(b);
         }
-        data_q = data_q.bind(page_size as i64).bind(offset);
         let entries = data_q.fetch_all(&self.pool).await?;
 
         let total_pages = ((total as f64) / (page_size as f64)).ceil() as i32;
@@ -319,12 +466,11 @@ impl EntryRepository {
     }
 
     pub async fn get_entry_budget_id(&self, entry_id: &str) -> Result<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT budget_id FROM entries WHERE id = ? AND deleted_at IS NULL",
-        )
-        .bind(entry_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT budget_id FROM entries WHERE id = ? AND deleted_at IS NULL")
+                .bind(entry_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(v,)| v))
     }
 
