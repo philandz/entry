@@ -80,7 +80,10 @@ pub fn map_entry(db: DbEntry) -> Entry {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
             updated_at: db.updated_at.and_utc().timestamp(),
-            deleted_at: db.deleted_at.map(|dt| dt.and_utc().timestamp()).unwrap_or(0),
+            deleted_at: db
+                .deleted_at
+                .map(|dt| dt.and_utc().timestamp())
+                .unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
@@ -115,7 +118,10 @@ pub fn map_comment(db: DbComment) -> Comment {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
             updated_at: db.updated_at.and_utc().timestamp(),
-            deleted_at: db.deleted_at.map(|dt| dt.and_utc().timestamp()).unwrap_or(0),
+            deleted_at: db
+                .deleted_at
+                .map(|dt| dt.and_utc().timestamp())
+                .unwrap_or(0),
             created_by: db.user_id,
             updated_by: String::new(),
             owner_id: String::new(),

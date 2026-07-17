@@ -45,6 +45,12 @@ message Budget {
   BudgetType budget_type = 4;
   string currency        = 5;  // ISO 4217, e.g. "VND", "USD"
   BudgetRole my_role     = 6;  // populated per-user in list/get responses
+
+  // Envelope / spend tracking
+  int64  envelope_limit = 7;   // monthly spending limit (0 if not set)
+  int64  current_spend  = 8;   // spend so far this month
+  double burn_rate_pct   = 9;   // projected % of limit consumed (0-100+)
+  int32  member_count    = 10;  // number of members in this budget
 }
 
 message BudgetMember {
@@ -53,6 +59,7 @@ message BudgetMember {
   string display_name = 3;
   string email        = 4;
   BudgetRole role     = 5;
+  string avatar       = 6;
 }
 
 message EnvelopeLimit {
@@ -86,6 +93,10 @@ message CreateBudgetResponse { Budget budget = 1; }
 message GetBudgetRequest  { string budget_id = 1; }
 message GetBudgetResponse { Budget budget = 1; }
 
+// Admin: get budget by ID (super_admin only)
+message GetBudgetAdminRequest { string budget_id = 1; }
+message GetBudgetAdminResponse { Budget budget = 1; }
+
 message UpdateBudgetRequest {
   string budget_id   = 1;
   string name        = 2;
@@ -98,6 +109,19 @@ message DeleteBudgetResponse { bool success = 1; }
 
 message ListBudgetsRequest  { string org_id = 1; }
 message ListBudgetsResponse { repeated Budget budgets = 1; }
+
+// Admin: list all budgets across all orgs (super_admin only)
+message ListBudgetsAdminRequest {
+  string org_id = 1;
+  string budget_type = 2;
+  string name_search = 3;
+  int32  page = 4;
+  int32  page_size = 5;
+}
+message ListBudgetsAdminResponse {
+  repeated Budget budgets = 1;
+  int32 total = 2;
+}
 
 // ---------------------------------------------------------------------------
 // Role authority (internal — called by Entry, Category, Sharing services)
@@ -138,6 +162,10 @@ message RemoveBudgetMemberResponse { bool success = 1; }
 
 message ListBudgetMembersRequest  { string budget_id = 1; }
 message ListBudgetMembersResponse { repeated BudgetMember members = 1; }
+
+// Admin: list budget members (super_admin only)
+message ListBudgetMembersAdminRequest { string budget_id = 1; }
+message ListBudgetMembersAdminResponse { repeated BudgetMember members = 1; }
 
 // ---------------------------------------------------------------------------
 // Envelope limits & burn-rate
@@ -323,6 +351,12 @@ service BudgetService {
   rpc ListBudgets(ListBudgetsRequest) returns (ListBudgetsResponse) {
     option (google.api.http) = { get: "/budgets" };
   }
+  // Admin: list all budgets (super_admin only)
+  rpc ListBudgetsAdmin(ListBudgetsAdminRequest) returns (ListBudgetsAdminResponse) {}
+// Admin: get budget by ID (super_admin only)
+  rpc GetBudgetAdmin(GetBudgetAdminRequest) returns (GetBudgetAdminResponse) {}
+  // Admin: list budget members (super_admin only)
+  rpc ListBudgetMembersAdmin(ListBudgetMembersAdminRequest) returns (ListBudgetMembersAdminResponse) {}
 
   // Role authority (internal — no public HTTP binding)
   rpc CheckRole(CheckRoleRequest) returns (CheckRoleResponse) {}

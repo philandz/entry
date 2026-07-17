@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let include_refs: Vec<&str> = includes.iter().map(String::as_str).collect();
-    let files = [
+    let mut files: Vec<String> = vec![
         format!("{proto_prefix}/entry/entry.proto"),
         format!("{proto_prefix}/budget/budget.proto"),
         format!("{proto_prefix}/identity/identity.proto"),
@@ -33,6 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         format!("{proto_prefix}/shared/organization/organization.proto"),
         format!("{libs_prefix}/protobuf/common/base.proto"),
     ];
+    let query_proto = format!("{libs_prefix}/protobuf/query/query.proto");
+    if Path::new(&query_proto).exists() {
+        files.push(query_proto);
+    }
     let file_refs: Vec<&str> = files.iter().map(String::as_str).collect();
 
     tonic_build::configure()
