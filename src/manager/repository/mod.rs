@@ -69,13 +69,9 @@ impl<'a> EntryQueryBuilder<'a> {
             return self;
         }
         let placeholders = member_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        self.conditions.push(format!(
-            "e.budget_id IN (SELECT DISTINCT budget_id FROM budget_members \
-             WHERE user_id IN ({placeholders}) AND deleted_at IS NULL)"
-        ));
-        for id in member_ids {
-            self.binds.push(id.clone());
-        }
+        self.conditions
+            .push(format!("e.created_by IN ({placeholders})"));
+        self.binds.extend(member_ids.iter().cloned());
         self
     }
 

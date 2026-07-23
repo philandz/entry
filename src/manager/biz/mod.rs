@@ -313,12 +313,10 @@ impl EntryBiz {
                 result.meta,
             ))
         } else {
-            // Cross-budget path: when member_ids are provided, validate that the user
-            // is a member of each requested budget to prevent cross-budget data leakage.
-            if !params.member_ids.is_empty() {
-                for mid in &params.member_ids {
-                    self.assert_member(mid, user_id, user_type).await?;
-                }
+            // Cross-budget path: validate that the user is a member of each requested
+            // budget to prevent cross-budget data leakage.
+            for requested_budget_id in budget_ids {
+                self.assert_member(requested_budget_id, user_id, user_type).await?;
             }
             let result = self
                 .repo
