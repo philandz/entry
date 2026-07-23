@@ -316,7 +316,8 @@ impl EntryBiz {
             // Cross-budget path: validate that the user is a member of each requested
             // budget to prevent cross-budget data leakage.
             for requested_budget_id in budget_ids {
-                self.assert_member(requested_budget_id, user_id, user_type).await?;
+                self.assert_member(requested_budget_id, user_id, user_type)
+                    .await?;
             }
             let result = self
                 .repo

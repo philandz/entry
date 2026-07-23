@@ -640,10 +640,7 @@ impl EntryRepository {
     // Summary aggregation
     // -----------------------------------------------------------------------
 
-    pub async fn get_entry_summary_totals(
-        &self,
-        budget_id: &str,
-    ) -> Result<EntrySummaryTotals> {
+    pub async fn get_entry_summary_totals(&self, budget_id: &str) -> Result<EntrySummaryTotals> {
         #[derive(Debug, sqlx::FromRow)]
         struct SummaryRow {
             total_income: i64,

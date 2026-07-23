@@ -89,7 +89,13 @@ fn member_ids_filter_entry_creators() {
         !sql.contains("budget_members"),
         "membership must not filter creators: {sql}"
     );
-    assert_eq!(binds, vec![cat("user-1111-1111-1111-111111111111"), cat("user-2222-2222-2222-222222222222")]);
+    assert_eq!(
+        binds,
+        vec![
+            cat("user-1111-1111-1111-111111111111"),
+            cat("user-2222-2222-2222-222222222222")
+        ]
+    );
 }
 
 #[test]
