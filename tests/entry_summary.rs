@@ -4,7 +4,6 @@
 //! while excluding soft-deleted entries.
 
 use entry::pb::service::entry::{EntryKind, EntrySummary};
-use std::collections::HashMap;
 
 /// Verifies that EntrySummary values are correct given income/expense rows.
 /// This is a pure-unit test of the data shape — repository/biz integration
@@ -14,7 +13,7 @@ fn entry_summary_values_match_inserted_entries() {
     // Simulate the expected summary computation
     let income_amount: i64 = 1_000_000;
     let expense_amount: i64 = 300_000;
-    let deleted_expense: i64 = 500_000; // should be excluded
+    let _deleted_expense: i64 = 500_000; // should be excluded
 
     let total_income = income_amount;
     let total_expense = expense_amount; // deleted row excluded
@@ -44,10 +43,10 @@ fn entry_summary_excludes_deleted_entries() {
     // All entries including deleted
     let all_income: i64 = 1_000_000;
     let all_expense: i64 = 800_000; // 300k active + 500k deleted
-    let deleted_expense: i64 = 500_000;
+    let _deleted_expense: i64 = 500_000;
 
     // Summary should only include non-deleted
-    let active_expense = all_expense - deleted_expense;
+    let active_expense = all_expense - _deleted_expense;
     assert_eq!(active_expense, 300_000);
 
     let current_balance = all_income - active_expense;
