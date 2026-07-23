@@ -67,11 +67,11 @@ fn category_ids_builds_in_clause_with_2_binds() {
 }
 
 // ---------------------------------------------------------------------------
-// member_ids with 2 values → subquery against budget_members
+// member_ids with 2 values → filters by entry creator
 // ---------------------------------------------------------------------------
 
 #[test]
-fn member_ids_builds_subquery_on_budget_members() {
+fn member_ids_filter_entry_creators() {
     let mut params = make_params();
     params.member_ids = vec![
         cat("user-1111-1111-1111-111111111111"),
@@ -82,14 +82,20 @@ fn member_ids_builds_subquery_on_budget_members() {
     let (sql, binds) = builder.build_count();
 
     assert!(
-        sql.contains("budget_members"),
-        "expected budget_members subquery in: {sql}"
+        sql.contains("e.created_by IN (?,?)"),
+        "expected e.created_by IN (?,?) in: {sql}"
     );
     assert!(
-        sql.contains("user_id IN (?,?)"),
-        "expected user_id IN clause in: {sql}"
+        !sql.contains("budget_members"),
+        "membership must not filter creators: {sql}"
     );
-    assert_eq!(binds.len(), 2, "expected 2 member binds, got: {binds:?}");
+    assert_eq!(
+        binds,
+        vec![
+            cat("user-1111-1111-1111-111111111111"),
+            cat("user-2222-2222-2222-222222222222")
+        ]
+    );
 }
 
 #[test]
@@ -184,8 +190,8 @@ fn mixed_filters_all_conditions_present() {
         "missing category IN: {sql}"
     );
     assert!(
-        sql.contains("budget_members"),
-        "missing member subquery: {sql}"
+        sql.contains("e.created_by IN (?)"),
+        "missing member filter: {sql}"
     );
     assert!(sql.contains("e.kind = ?"), "missing kind: {sql}");
     assert!(

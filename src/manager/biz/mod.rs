@@ -9,7 +9,7 @@ use crate::manager::repository::EntryRepository;
 use crate::pb::service::budget::BudgetRole;
 use crate::pb::service::entry::{
     Attachment, BulkImportEntriesResponse, BulkImportRow, BulkImportRowResult, Comment,
-    CreateSplitEntryResponse, Entry, EntryKind, ListParams, PageMeta,
+    CreateSplitEntryResponse, Entry, EntryKind, EntrySummary, ListParams, PageMeta,
 };
 
 pub struct EntryBiz {
@@ -313,12 +313,11 @@ impl EntryBiz {
                 result.meta,
             ))
         } else {
-            // Cross-budget path: when member_ids are provided, validate that the user
-            // is a member of each requested budget to prevent cross-budget data leakage.
-            if !params.member_ids.is_empty() {
-                for mid in &params.member_ids {
-                    self.assert_member(mid, user_id, user_type).await?;
-                }
+            // Cross-budget path: validate that the user is a member of each requested
+            // budget to prevent cross-budget data leakage.
+            for requested_budget_id in budget_ids {
+                self.assert_member(requested_budget_id, user_id, user_type)
+                    .await?;
             }
             let result = self
                 .repo
@@ -381,6 +380,30 @@ impl EntryBiz {
             .delete_entry(entry_id)
             .await
             .map_err(Self::internal)
+    }
+
+    // -----------------------------------------------------------------------
+    // Summary
+    // -----------------------------------------------------------------------
+
+    pub async fn get_entry_summary(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<EntrySummary, Status> {
+        self.assert_member(budget_id, user_id, user_type).await?;
+        let totals = self
+            .repo
+            .get_entry_summary_totals(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        Ok(EntrySummary {
+            budget_id: budget_id.to_string(),
+            total_income: totals.total_income,
+            total_expense: totals.total_expense,
+            current_balance: totals.total_income - totals.total_expense,
+        })
     }
 
     // -----------------------------------------------------------------------

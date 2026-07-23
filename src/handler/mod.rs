@@ -25,8 +25,10 @@ use crate::pb::service::entry::{
     EditCommentRequest,
     Entry,
     EntryKind,
+    EntrySummary,
     GetEntryRequest,
     GetEntryResponse,
+    GetEntrySummaryRequest,
     ListAttachmentsRequest,
     ListAttachmentsResponse,
     ListCommentsRequest,
@@ -357,6 +359,24 @@ impl EntryService for EntryHandler {
         let req = request.into_inner();
         let entry = self.biz.cancel_recurrence(&user_id, &req.entry_id).await?;
         Ok(Response::new(entry))
+    }
+
+    // -----------------------------------------------------------------------
+    // Summary
+    // -----------------------------------------------------------------------
+
+    async fn get_entry_summary(
+        &self,
+        request: Request<GetEntrySummaryRequest>,
+    ) -> Result<Response<EntrySummary>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        let summary = self
+            .biz
+            .get_entry_summary(&user_id, &req.budget_id, user_type.as_deref())
+            .await?;
+        Ok(Response::new(summary))
     }
 
     // -----------------------------------------------------------------------

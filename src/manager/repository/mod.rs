@@ -18,6 +18,12 @@ pub struct ListResult {
     pub meta: PageMeta,
 }
 
+#[derive(Debug)]
+pub struct EntrySummaryTotals {
+    pub total_income: i64,
+    pub total_expense: i64,
+}
+
 /// A bind variable for dynamic query conditions — stored as String for sqlx query building.
 pub type SqlBind = String;
 
@@ -69,13 +75,9 @@ impl<'a> EntryQueryBuilder<'a> {
             return self;
         }
         let placeholders = member_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        self.conditions.push(format!(
-            "e.budget_id IN (SELECT DISTINCT budget_id FROM budget_members \
-             WHERE user_id IN ({placeholders}) AND deleted_at IS NULL)"
-        ));
-        for id in member_ids {
-            self.binds.push(id.clone());
-        }
+        self.conditions
+            .push(format!("e.created_by IN ({placeholders})"));
+        self.binds.extend(member_ids.iter().cloned());
         self
     }
 
@@ -632,6 +634,43 @@ impl EntryRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Summary aggregation
+    // -----------------------------------------------------------------------
+
+    pub async fn get_entry_summary_totals(&self, budget_id: &str) -> Result<EntrySummaryTotals> {
+        #[derive(Debug, sqlx::FromRow)]
+        struct SummaryRow {
+            total_income: i64,
+            total_expense: i64,
+        }
+
+        let row: Option<SummaryRow> = sqlx::query_as(
+            r#"
+SELECT
+  CAST(COALESCE(SUM(CASE WHEN kind = 'income' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_income,
+  CAST(COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_expense
+FROM entries
+WHERE BINARY budget_id = BINARY ?
+  AND deleted_at IS NULL
+"#,
+        )
+        .bind(budget_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map_or(
+            EntrySummaryTotals {
+                total_income: 0,
+                total_expense: 0,
+            },
+            |r| EntrySummaryTotals {
+                total_income: r.total_income,
+                total_expense: r.total_expense,
+            },
+        ))
     }
 
     // -----------------------------------------------------------------------
