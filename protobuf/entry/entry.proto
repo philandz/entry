@@ -243,6 +243,19 @@ message ListSplitLegsRequest  { string entry_id = 1; }
 message ListSplitLegsResponse { repeated Entry legs = 1; string split_group_id = 2; }
 
 // ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
+
+message GetEntrySummaryRequest { string budget_id = 1; }
+
+message EntrySummary {
+  string budget_id     = 1;
+  int64  total_income  = 2;
+  int64  total_expense = 3;
+  int64  current_balance = 4;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -311,5 +324,10 @@ service EntryService {
   }
   rpc ListSplitLegs(ListSplitLegsRequest) returns (ListSplitLegsResponse) {
     option (google.api.http) = { get: "/entries/{entry_id}/split-legs" };
+  }
+
+  // Summary
+  rpc GetEntrySummary(GetEntrySummaryRequest) returns (EntrySummary) {
+    option (google.api.http) = { get: "/budgets/{budget_id}/summary" };
   }
 }
