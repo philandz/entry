@@ -114,6 +114,12 @@ pub fn map_entry(db: DbEntry) -> Entry {
 
 pub fn map_comment(db: DbComment) -> Comment {
     Comment {
+        id: db.id.clone(),
+        entry_id: db.entry_id,
+        body: db.comment_text,
+        created_by: db.user_id.clone(),
+        created_at: db.created_at.and_utc().timestamp(),
+        updated_at: db.updated_at.and_utc().timestamp(),
         base: Some(Base {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
@@ -127,13 +133,17 @@ pub fn map_comment(db: DbComment) -> Comment {
             owner_id: String::new(),
             status: 0,
         }),
-        entry_id: db.entry_id,
-        body: db.comment_text,
     }
 }
 
 pub fn map_attachment(db: DbAttachment) -> Attachment {
     Attachment {
+        id: db.id.clone(),
+        entry_id: db.entry_id,
+        file_id: db.file_id,
+        file_name: db.file_name,
+        created_by: db.user_id.clone(),
+        created_at: db.created_at.and_utc().timestamp(),
         base: Some(Base {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
@@ -144,8 +154,5 @@ pub fn map_attachment(db: DbAttachment) -> Attachment {
             owner_id: String::new(),
             status: 0,
         }),
-        entry_id: db.entry_id,
-        file_id: db.file_id,
-        file_name: db.file_name,
     }
 }
