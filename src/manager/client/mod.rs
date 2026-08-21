@@ -20,6 +20,14 @@ impl BudgetClient {
         })
     }
 
+    /// Construct from an already-connected channel. Used with
+    /// `philand_application::connect::connect_default` for retry-on-startup.
+    pub fn from_channel(channel: Channel) -> Self {
+        Self {
+            inner: BudgetServiceClient::new(channel),
+        }
+    }
+
     pub async fn check_role(
         &mut self,
         user_id: &str,
