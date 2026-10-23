@@ -108,7 +108,11 @@ impl<'a> EntryQueryBuilder<'a> {
 
     pub fn apply_kind(mut self) -> Self {
         if let Some(ref kind) = self.params.kind {
-            if !kind.is_empty() {
+            if kind == "transfer" {
+                // Both legs of a transfer; fixed literals, nothing to bind.
+                self.conditions
+                    .push("e.kind IN ('transfer_out','transfer_in')".to_string());
+            } else if !kind.is_empty() {
                 self.conditions.push("e.kind = ?".to_string());
                 self.binds.push(kind.clone());
             }
