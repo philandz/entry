@@ -114,3 +114,32 @@ pub fn repeated_ids(ids: &[String], field: &str, max: usize) -> Result<(), Statu
     }
     Ok(())
 }
+
+/// Max number of budgets and max span accepted by `GetPeriodTotals`.
+pub const PERIOD_TOTALS_MAX_BUDGETS: usize = 200;
+pub const PERIOD_TOTALS_MAX_DAYS: i64 = 3660;
+
+/// Validates a `PeriodTotalsRequest` window. Returns the parsed (from, to) dates.
+pub fn period_totals_window(
+    budget_ids: &[String],
+    date_from: &str,
+    date_to: &str,
+) -> Result<(chrono::NaiveDate, chrono::NaiveDate), Status> {
+    if budget_ids.is_empty() {
+        return Err(Status::invalid_argument("budget_ids must not be empty"));
+    }
+    repeated_ids(budget_ids, "budget_ids", PERIOD_TOTALS_MAX_BUDGETS)?;
+    let from = chrono::NaiveDate::parse_from_str(date_from, "%Y-%m-%d")
+        .map_err(|_| Status::invalid_argument("date_from must be YYYY-MM-DD"))?;
+    let to = chrono::NaiveDate::parse_from_str(date_to, "%Y-%m-%d")
+        .map_err(|_| Status::invalid_argument("date_to must be YYYY-MM-DD"))?;
+    if from >= to {
+        return Err(Status::invalid_argument("date_from must be before date_to"));
+    }
+    if (to - from).num_days() > PERIOD_TOTALS_MAX_DAYS {
+        return Err(Status::invalid_argument(format!(
+            "date range must not exceed {PERIOD_TOTALS_MAX_DAYS} days"
+        )));
+    }
+    Ok((from, to))
+}

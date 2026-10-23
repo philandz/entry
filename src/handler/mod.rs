@@ -37,6 +37,8 @@ use crate::pb::service::entry::{
     ListEntriesResponse,
     ListSplitLegsRequest,
     ListSplitLegsResponse,
+    PeriodTotalsRequest,
+    PeriodTotalsResponse,
     RemoveAttachmentRequest,
     RemoveAttachmentResponse,
     UpdateEntryRequest,
@@ -91,6 +93,16 @@ impl EntryService for EntryHandler {
             )
             .await?;
         Ok(Response::new(entry))
+    }
+
+    async fn get_period_totals(
+        &self,
+        request: Request<PeriodTotalsRequest>,
+    ) -> Result<Response<PeriodTotalsResponse>, Status> {
+        // Internal RPC: still require the caller identity header, like every other RPC.
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.get_period_totals(&req).await?))
     }
 
     async fn get_entry(

@@ -433,6 +433,49 @@ impl EntryBiz {
     }
 
     // -----------------------------------------------------------------------
+    // Period totals (internal)
+    // -----------------------------------------------------------------------
+
+    /// Internal aggregation for other services. The caller is responsible for
+    /// having authorised the user against every budget in `budget_ids`.
+    pub async fn get_period_totals(
+        &self,
+        req: &crate::pb::service::entry::PeriodTotalsRequest,
+    ) -> Result<crate::pb::service::entry::PeriodTotalsResponse, Status> {
+        crate::manager::validate::period_totals_window(
+            &req.budget_ids,
+            &req.date_from,
+            &req.date_to,
+        )?;
+        let rows = self
+            .repo
+            .get_period_totals(
+                &req.budget_ids,
+                &req.date_from,
+                &req.date_to,
+                req.group_by_category,
+                req.group_by_day,
+            )
+            .await
+            .map_err(Self::internal)?;
+        Ok(crate::pb::service::entry::PeriodTotalsResponse {
+            rows: rows
+                .into_iter()
+                .map(|r| crate::pb::service::entry::PeriodTotalsRow {
+                    budget_id: r.budget_id,
+                    category_id: r.category_id,
+                    day: r.day,
+                    income: r.income,
+                    expense: r.expense,
+                    transfer_in: r.transfer_in,
+                    transfer_out: r.transfer_out,
+                    count: r.cnt,
+                })
+                .collect(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
     // Bulk import
     // -----------------------------------------------------------------------
 

@@ -24,6 +24,19 @@ pub struct EntrySummaryTotals {
     pub total_expense: i64,
 }
 
+/// One aggregated row of `get_period_totals`.
+#[derive(Debug, sqlx::FromRow)]
+pub struct PeriodTotalsDbRow {
+    pub budget_id: String,
+    pub category_id: String,
+    pub day: String,
+    pub income: i64,
+    pub expense: i64,
+    pub transfer_in: i64,
+    pub transfer_out: i64,
+    pub cnt: i64,
+}
+
 /// A bind variable for dynamic query conditions — stored as String for sqlx query building.
 pub type SqlBind = String;
 
@@ -645,6 +658,57 @@ WHERE BINARY budget_id = BINARY ?
                 total_expense: r.total_expense,
             },
         ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Period totals (consumed by budget / category / insight over gRPC)
+    // -----------------------------------------------------------------------
+
+    /// Aggregates income / expense / transfers for `budget_ids` over
+    /// `[date_from, date_to)`. `date_*` are local calendar dates.
+    pub async fn get_period_totals(
+        &self,
+        budget_ids: &[String],
+        date_from: &str,
+        date_to: &str,
+        group_by_category: bool,
+        group_by_day: bool,
+    ) -> Result<Vec<PeriodTotalsDbRow>> {
+        let placeholders = budget_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let cat_expr = if group_by_category {
+            "COALESCE(e.category_id, '')"
+        } else {
+            "''"
+        };
+        let day_expr = if group_by_day {
+            "DATE_FORMAT(e.entry_date, '%Y-%m-%d')"
+        } else {
+            "''"
+        };
+        let sql = format!(
+            "SELECT e.budget_id AS budget_id, \
+                    {cat_expr} AS category_id, \
+                    {day_expr} AS day, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'income' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS income, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS expense, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_in' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_in, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_out' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_out, \
+                    CAST(COUNT(*) AS SIGNED) AS cnt \
+             FROM entries e \
+             WHERE e.deleted_at IS NULL \
+               AND e.budget_id IN ({placeholders}) \
+               AND e.entry_date >= ? AND e.entry_date < ? \
+             GROUP BY 1, 2, 3 \
+             ORDER BY 1, 2, 3"
+        );
+        let mut q = sqlx::query_as::<_, PeriodTotalsDbRow>(&sql);
+        for id in budget_ids {
+            q = q.bind(id);
+        }
+        Ok(q.bind(date_from)
+            .bind(date_to)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     // -----------------------------------------------------------------------
