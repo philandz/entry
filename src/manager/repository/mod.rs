@@ -187,7 +187,7 @@ impl<'a> EntryQueryBuilder<'a> {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date, \
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule, \
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence, \
-                    e.split_group_id, e.split_total, \
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind, \
                     e.created_by, e.created_at, e.updated_at, e.deleted_at, \
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment \
              FROM entries e {where_clause} \
@@ -290,7 +290,7 @@ impl EntryRepository {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM entries e
@@ -583,7 +583,7 @@ impl EntryRepository {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     0 AS has_attachment
              FROM entries e
@@ -657,7 +657,7 @@ WHERE BINARY budget_id = BINARY ?
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM entries e

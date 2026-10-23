@@ -15,6 +15,12 @@ enum EntryKind {
   ENTRY_KIND_UNSPECIFIED = 0;
   ENTRY_KIND_EXPENSE     = 1;
   ENTRY_KIND_INCOME      = 2;
+  // Money moved between two budgets of the same org. Always created as a
+  // pair (OUT on the source budget, IN on the destination) that share a
+  // transfer_group_id. Never counted as income or expense. Cannot be created
+  // through CreateEntry/UpdateEntry/BulkImport — use the transfer RPCs.
+  ENTRY_KIND_TRANSFER_OUT = 3;
+  ENTRY_KIND_TRANSFER_IN  = 4;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +45,10 @@ message Entry {
   // Split
   optional string  split_group_id  = 17;  // UUID linking split legs together
   optional int64   split_total     = 18;  // total amount of the split group
+  // Transfer (only set when kind is TRANSFER_OUT / TRANSFER_IN)
+  optional string  transfer_group_id      = 19; // UUID shared by both legs
+  optional string  counterparty_budget_id = 20; // budget on the other side
+  optional string  counterparty_kind      = 21; // "entry" | "fund_cash"
 }
 
 message Comment {
