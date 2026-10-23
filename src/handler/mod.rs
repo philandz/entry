@@ -18,10 +18,14 @@ use crate::pb::service::entry::{
     // Split
     CreateSplitEntryRequest,
     CreateSplitEntryResponse,
+    CreateTransferLegRequest,
+    CreateTransferRequest,
     DeleteCommentRequest,
     DeleteCommentResponse,
     DeleteEntryRequest,
     DeleteEntryResponse,
+    DeleteTransferRequest,
+    DeleteTransferResponse,
     EditCommentRequest,
     Entry,
     EntryKind,
@@ -41,8 +45,11 @@ use crate::pb::service::entry::{
     PeriodTotalsResponse,
     RemoveAttachmentRequest,
     RemoveAttachmentResponse,
+    Transfer,
     UpdateEntryRequest,
     UpdateRecurrenceRuleRequest,
+    UpdateTransferRequest,
+    VoidTransferLegRequest,
 };
 
 pub struct EntryHandler {
@@ -103,6 +110,70 @@ impl EntryService for EntryHandler {
         validate::user_id_from_metadata(request.metadata())?;
         let req = request.into_inner();
         Ok(Response::new(self.biz.get_period_totals(&req).await?))
+    }
+
+    async fn create_transfer(
+        &self,
+        request: Request<CreateTransferRequest>,
+    ) -> Result<Response<Transfer>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_transfer(&user_id, &req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn update_transfer(
+        &self,
+        request: Request<UpdateTransferRequest>,
+    ) -> Result<Response<Transfer>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .update_transfer(&user_id, &req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn delete_transfer(
+        &self,
+        request: Request<DeleteTransferRequest>,
+    ) -> Result<Response<DeleteTransferResponse>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        self.biz
+            .delete_transfer(&user_id, &req.group_id, user_type.as_deref())
+            .await?;
+        Ok(Response::new(DeleteTransferResponse { success: true }))
+    }
+
+    async fn create_transfer_leg(
+        &self,
+        request: Request<CreateTransferLegRequest>,
+    ) -> Result<Response<Entry>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_transfer_leg(&req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn void_transfer_leg(
+        &self,
+        request: Request<VoidTransferLegRequest>,
+    ) -> Result<Response<Entry>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.void_transfer_leg(&req).await?))
     }
 
     async fn get_entry(

@@ -143,3 +143,77 @@ pub fn period_totals_window(
     }
     Ok((from, to))
 }
+
+pub const TRANSFER_MAX_DESCRIPTION: usize = 500;
+
+pub fn iso_date(field: &str, v: &str) -> Result<chrono::NaiveDate, Status> {
+    chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d")
+        .map_err(|_| Status::invalid_argument(format!("{field} must be YYYY-MM-DD")))
+}
+
+fn uuid_field(field: &str, v: &str) -> Result<(), Status> {
+    uuid::Uuid::parse_str(v)
+        .map(|_| ())
+        .map_err(|_| Status::invalid_argument(format!("{field} must be a UUID")))
+}
+
+/// Static checks for CreateTransfer (no I/O).
+pub fn create_transfer(
+    req: &crate::pb::service::entry::CreateTransferRequest,
+) -> Result<(), Status> {
+    uuid_field("source_budget_id", &req.source_budget_id)?;
+    uuid_field("destination_budget_id", &req.destination_budget_id)?;
+    if req.source_budget_id == req.destination_budget_id {
+        return Err(Status::invalid_argument(
+            "source and destination budgets must differ",
+        ));
+    }
+    positive_amount(req.amount)?;
+    iso_date("entry_date", &req.entry_date)?;
+    transfer_text(&req.description, req.notes.as_deref(), &req.idempotency_key)
+}
+
+pub fn transfer_text(
+    description: &str,
+    notes: Option<&str>,
+    idempotency_key: &str,
+) -> Result<(), Status> {
+    if description.chars().count() > TRANSFER_MAX_DESCRIPTION {
+        return Err(Status::invalid_argument("description too long"));
+    }
+    if notes.map(|n| n.chars().count() > 2000).unwrap_or(false) {
+        return Err(Status::invalid_argument("notes too long"));
+    }
+    if idempotency_key.len() > 64 {
+        return Err(Status::invalid_argument(
+            "idempotency_key must be at most 64 characters",
+        ));
+    }
+    Ok(())
+}
+
+/// Entry-service transfers move money between two *standard* budgets of the same
+/// organisation and currency. Everything else is rejected with FAILED_PRECONDITION
+/// (saving/invest funds go through the budget service's fund deposit/withdraw).
+pub fn transfer_compat(
+    src: &crate::manager::client::BudgetCtx,
+    dst: &crate::manager::client::BudgetCtx,
+) -> Result<(), Status> {
+    use crate::pb::service::budget::BudgetType;
+    if src.budget_type != BudgetType::Standard || dst.budget_type != BudgetType::Standard {
+        return Err(Status::failed_precondition(
+            "transfers here are only between standard budgets; use fund deposit/withdraw for saving or invest budgets",
+        ));
+    }
+    if src.org_id.is_empty() || src.org_id != dst.org_id {
+        return Err(Status::failed_precondition(
+            "budgets must belong to the same organisation",
+        ));
+    }
+    if src.currency.is_empty() || src.currency != dst.currency {
+        return Err(Status::failed_precondition(
+            "budgets must use the same currency",
+        ));
+    }
+    Ok(())
+}

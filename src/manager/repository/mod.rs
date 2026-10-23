@@ -1,3 +1,5 @@
+pub mod transfers;
+
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::MySqlPool;

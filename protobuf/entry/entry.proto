@@ -298,12 +298,76 @@ message PeriodTotalsRow {
 message PeriodTotalsResponse { repeated PeriodTotalsRow rows = 1; }
 
 // ---------------------------------------------------------------------------
+// Transfers (plan R1): money moved between two budgets, stored as a pair of entries
+// ---------------------------------------------------------------------------
+
+message CreateTransferRequest {
+  string source_budget_id      = 1;
+  string destination_budget_id = 2;
+  int64  amount                = 3;  // minor units, > 0
+  string entry_date            = 4;  // YYYY-MM-DD
+  string description           = 5;
+  optional string notes        = 6;
+  string idempotency_key       = 7;  // optional; same key returns the same transfer
+}
+
+message Transfer {
+  string group_id = 1;
+  Entry  out_entry = 2;
+  Entry  in_entry  = 3;
+}
+
+message UpdateTransferRequest {
+  string group_id = 1;
+  optional int64  amount      = 2;
+  optional string entry_date  = 3;
+  optional string description = 4;
+  optional string notes       = 5;
+}
+
+message DeleteTransferRequest  { string group_id = 1; }
+message DeleteTransferResponse { bool success = 1; }
+
+// Internal (budget-service saga): one leg only, idempotent on (budget_id, idempotency_key).
+message CreateTransferLegRequest {
+  string budget_id               = 1;
+  EntryKind kind                 = 2;  // TRANSFER_OUT or TRANSFER_IN
+  int64  amount                  = 3;
+  string entry_date              = 4;
+  string description             = 5;
+  string transfer_group_id       = 6;
+  string counterparty_budget_id  = 7;
+  string counterparty_kind       = 8;  // "fund_cash"
+  string idempotency_key         = 9;
+  string actor_user_id           = 10;
+}
+
+message VoidTransferLegRequest {
+  string budget_id       = 1;
+  string idempotency_key = 2;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
 service EntryService {
   // Internal aggregation (no HTTP route)
   rpc GetPeriodTotals(PeriodTotalsRequest) returns (PeriodTotalsResponse);
+  // Internal transfer legs for the budget-service saga (no HTTP route)
+  rpc CreateTransferLeg(CreateTransferLegRequest) returns (Entry);
+  rpc VoidTransferLeg(VoidTransferLegRequest) returns (Entry);
+
+  // Transfers between budgets
+  rpc CreateTransfer(CreateTransferRequest) returns (Transfer) {
+    option (google.api.http) = { post: "/transfers" body: "*" };
+  }
+  rpc UpdateTransfer(UpdateTransferRequest) returns (Transfer) {
+    option (google.api.http) = { patch: "/transfers/{group_id}" body: "*" };
+  }
+  rpc DeleteTransfer(DeleteTransferRequest) returns (DeleteTransferResponse) {
+    option (google.api.http) = { delete: "/transfers/{group_id}" };
+  }
 
   // Entry CRUD
   rpc CreateEntry(CreateEntryRequest) returns (Entry) {

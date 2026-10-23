@@ -12,6 +12,8 @@ use crate::pb::service::entry::{
     CreateSplitEntryResponse, Entry, EntryKind, EntrySummary, ListParams, PageMeta,
 };
 
+mod transfer;
+
 pub struct EntryBiz {
     pub repo: Arc<EntryRepository>,
     pub budget_client: Arc<Mutex<BudgetClient>>,
