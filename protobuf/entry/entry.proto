@@ -268,10 +268,43 @@ message EntrySummary {
 }
 
 // ---------------------------------------------------------------------------
+// Period totals (internal — called by budget, category, insight services)
+// ---------------------------------------------------------------------------
+
+// Aggregates entries so other services never have to read the entries table.
+// Dates are local calendar dates (entries.entry_date); date_from is inclusive,
+// date_to is exclusive. There is deliberately no google.api.http annotation:
+// the gateway does not expose this RPC, and callers have already authorised
+// the user against each budget.
+message PeriodTotalsRequest {
+  repeated string budget_ids       = 1;  // 1..200 ids
+  string          date_from        = 2;  // YYYY-MM-DD inclusive
+  string          date_to          = 3;  // YYYY-MM-DD exclusive
+  bool            group_by_category = 4; // one row per (budget, category)
+  bool            group_by_day      = 5; // one row per (budget, [category,] day)
+}
+
+message PeriodTotalsRow {
+  string budget_id    = 1;
+  string category_id  = 2;  // "" when not grouped by category, or uncategorised
+  string day          = 3;  // YYYY-MM-DD, "" when not grouped by day
+  int64  income       = 4;
+  int64  expense      = 5;
+  int64  transfer_in  = 6;
+  int64  transfer_out = 7;
+  int64  count        = 8;
+}
+
+message PeriodTotalsResponse { repeated PeriodTotalsRow rows = 1; }
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
 service EntryService {
+  // Internal aggregation (no HTTP route)
+  rpc GetPeriodTotals(PeriodTotalsRequest) returns (PeriodTotalsResponse);
+
   // Entry CRUD
   rpc CreateEntry(CreateEntryRequest) returns (Entry) {
     option (google.api.http) = { post: "/entries" body: "*" };
