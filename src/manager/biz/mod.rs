@@ -61,6 +61,24 @@ impl EntryBiz {
         Ok(())
     }
 
+    /// Transfer legs are managed as a pair by the transfer RPCs; editing or
+    /// deleting one leg through the generic entry RPCs would unbalance them.
+    async fn assert_not_transfer_leg(&self, entry_id: &str) -> Result<(), Status> {
+        let db = self
+            .repo
+            .get_entry(entry_id)
+            .await
+            .map_err(|_| Status::not_found("Entry not found"))?;
+        if db.transfer_group_id.is_some()
+            || crate::converters::is_transfer(crate::converters::kind_from_db(&db.kind))
+        {
+            return Err(Status::failed_precondition(
+                "this entry is part of a transfer; manage it via the transfer endpoints",
+            ));
+        }
+        Ok(())
+    }
+
     async fn assert_contributor(
         &self,
         budget_id: &str,
@@ -97,6 +115,7 @@ impl EntryBiz {
         notes: Option<&str>,
         user_type: Option<&str>,
     ) -> Result<Entry, Status> {
+        crate::manager::validate::reject_transfer_kind(kind)?;
         self.assert_contributor(budget_id, user_id, user_type)
             .await?;
         let db = self
@@ -135,6 +154,7 @@ impl EntryBiz {
         notes: Option<&str>,
         recurrence_rule: &str,
     ) -> Result<Entry, Status> {
+        crate::manager::validate::reject_transfer_kind(kind)?;
         if recurrence_rule.is_empty() {
             return Err(Status::invalid_argument("recurrence_rule is required"));
         }
@@ -202,6 +222,7 @@ impl EntryBiz {
         notes: Option<&str>,
         legs: Vec<crate::pb::service::entry::SplitLeg>,
     ) -> Result<CreateSplitEntryResponse, Status> {
+        crate::manager::validate::reject_transfer_kind(kind)?;
         if legs.len() < 2 {
             return Err(Status::invalid_argument("Split requires at least 2 legs"));
         }
@@ -344,6 +365,9 @@ impl EntryBiz {
         tags: Option<&[String]>,
         notes: Option<&str>,
     ) -> Result<Entry, Status> {
+        if let Some(k) = kind {
+            crate::manager::validate::reject_transfer_kind(k)?;
+        }
         let budget_id = self
             .repo
             .get_entry_budget_id(entry_id)
@@ -351,6 +375,7 @@ impl EntryBiz {
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
         self.assert_contributor(&budget_id, user_id, None).await?;
+        self.assert_not_transfer_leg(entry_id).await?;
         let db = self
             .repo
             .update_entry(
@@ -376,6 +401,7 @@ impl EntryBiz {
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
         self.assert_contributor(&budget_id, user_id, None).await?;
+        self.assert_not_transfer_leg(entry_id).await?;
         self.repo
             .delete_entry(entry_id)
             .await
@@ -423,6 +449,16 @@ impl EntryBiz {
 
         for (i, row) in rows.into_iter().enumerate() {
             let kind = EntryKind::try_from(row.kind).unwrap_or(EntryKind::Expense);
+            if crate::converters::is_transfer(kind) {
+                results.push(BulkImportRowResult {
+                    row_index: i as i32,
+                    success: false,
+                    error: "transfer entries cannot be bulk imported".to_string(),
+                    entry_id: String::new(),
+                });
+                errors += 1;
+                continue;
+            }
             if row.amount <= 0 || row.entry_date.is_empty() {
                 results.push(BulkImportRowResult {
                     row_index: i as i32,

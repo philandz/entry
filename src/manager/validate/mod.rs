@@ -33,6 +33,17 @@ pub fn non_empty(field: &str, value: &str) -> Result<(), Status> {
     Ok(())
 }
 
+/// Transfer kinds are only created through the transfer RPCs (they always come
+/// in linked pairs). The generic entry RPCs must refuse them.
+pub fn reject_transfer_kind(kind: crate::pb::service::entry::EntryKind) -> Result<(), Status> {
+    if crate::converters::is_transfer(kind) {
+        return Err(Status::invalid_argument(
+            "transfer entries cannot be created or edited here; use the transfer endpoints",
+        ));
+    }
+    Ok(())
+}
+
 pub fn positive_amount(amount: i64) -> Result<(), Status> {
     if amount <= 0 {
         return Err(Status::invalid_argument("amount must be positive"));
