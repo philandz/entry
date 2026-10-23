@@ -459,7 +459,7 @@ impl EntryBiz {
             budget_id: budget_id.to_string(),
             total_income: totals.total_income,
             total_expense: totals.total_expense,
-            current_balance: totals.total_income - totals.total_expense,
+            current_balance: totals.total_income - totals.total_expense + totals.transfer_net,
         })
     }
 

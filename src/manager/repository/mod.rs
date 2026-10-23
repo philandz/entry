@@ -24,6 +24,9 @@ pub struct ListResult {
 pub struct EntrySummaryTotals {
     pub total_income: i64,
     pub total_expense: i64,
+    /// Net of transfers (in − out); transfers are neutral for income/expense
+    /// but move the balance.
+    pub transfer_net: i64,
 }
 
 /// One aggregated row of `get_period_totals`.
@@ -638,13 +641,17 @@ impl EntryRepository {
         struct SummaryRow {
             total_income: i64,
             total_expense: i64,
+            transfer_net: i64,
         }
 
         let row: Option<SummaryRow> = sqlx::query_as(
             r#"
 SELECT
   CAST(COALESCE(SUM(CASE WHEN kind = 'income' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_income,
-  CAST(COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_expense
+  CAST(COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_expense,
+  CAST(COALESCE(SUM(CASE WHEN kind = 'transfer_in' THEN CAST(amount_minor AS SIGNED)
+                         WHEN kind = 'transfer_out' THEN -CAST(amount_minor AS SIGNED)
+                         ELSE 0 END), 0) AS SIGNED) AS transfer_net
 FROM entries
 WHERE BINARY budget_id = BINARY ?
   AND deleted_at IS NULL
@@ -658,10 +665,12 @@ WHERE BINARY budget_id = BINARY ?
             EntrySummaryTotals {
                 total_income: 0,
                 total_expense: 0,
+                transfer_net: 0,
             },
             |r| EntrySummaryTotals {
                 total_income: r.total_income,
                 total_expense: r.total_expense,
+                transfer_net: r.transfer_net,
             },
         ))
     }
