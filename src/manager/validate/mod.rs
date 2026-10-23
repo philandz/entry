@@ -217,3 +217,24 @@ pub fn transfer_compat(
     }
     Ok(())
 }
+
+/// `FEATURE_SAVING_FUND=true` turns Saving budgets into funds (no manual income/expense).
+pub fn saving_fund_enabled() -> bool {
+    matches!(
+        std::env::var("FEATURE_SAVING_FUND").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Saving funds are changed through transfers and portfolio actions only.
+pub fn manual_entry_allowed(
+    fund_enabled: bool,
+    budget_type: crate::pb::service::budget::BudgetType,
+) -> Result<(), tonic::Status> {
+    if fund_enabled && budget_type == crate::pb::service::budget::BudgetType::Saving {
+        return Err(tonic::Status::failed_precondition(
+            "saving budgets are funds: move money with transfers or portfolio actions",
+        ));
+    }
+    Ok(())
+}

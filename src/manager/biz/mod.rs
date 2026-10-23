@@ -99,6 +99,34 @@ impl EntryBiz {
         Ok(())
     }
 
+    /// Contributor check for manual income/expense creation. Once the saving fund model is on,
+    /// Saving budgets only change through transfers and portfolio actions.
+    async fn assert_manual_entry_allowed(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
+        let ctx = self
+            .budget_client
+            .lock()
+            .await
+            .check_role_ctx(user_id, budget_id, user_type)
+            .await?;
+        if !matches!(
+            ctx.role,
+            BudgetRole::Owner | BudgetRole::Manager | BudgetRole::Contributor
+        ) {
+            return Err(Status::permission_denied(
+                "Requires Contributor role or higher",
+            ));
+        }
+        crate::manager::validate::manual_entry_allowed(
+            crate::manager::validate::saving_fund_enabled(),
+            ctx.budget_type,
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Entry CRUD
     // -----------------------------------------------------------------------
@@ -118,7 +146,7 @@ impl EntryBiz {
         user_type: Option<&str>,
     ) -> Result<Entry, Status> {
         crate::manager::validate::reject_transfer_kind(kind)?;
-        self.assert_contributor(budget_id, user_id, user_type)
+        self.assert_manual_entry_allowed(budget_id, user_id, user_type)
             .await?;
         let db = self
             .repo
@@ -160,7 +188,8 @@ impl EntryBiz {
         if recurrence_rule.is_empty() {
             return Err(Status::invalid_argument("recurrence_rule is required"));
         }
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
         let db = self
             .repo
             .create_entry_full(
