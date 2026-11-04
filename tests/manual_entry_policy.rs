@@ -23,3 +23,19 @@ fn other_budget_types_unaffected() {
         assert!(manual_entry_allowed(true, t).is_ok());
     }
 }
+
+#[test]
+fn sharing_rejects_manual_entries_when_sharing_v2_is_on() {
+    use entry::manager::validate::sharing_entry_allowed;
+    let e = sharing_entry_allowed(true, BudgetType::Sharing).unwrap_err();
+    assert_eq!(e.code(), tonic::Code::FailedPrecondition);
+    assert!(sharing_entry_allowed(false, BudgetType::Sharing).is_ok());
+    for t in [
+        BudgetType::Standard,
+        BudgetType::Saving,
+        BudgetType::Invest,
+        BudgetType::Debt,
+    ] {
+        assert!(sharing_entry_allowed(true, t).is_ok());
+    }
+}

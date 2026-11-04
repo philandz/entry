@@ -226,6 +226,29 @@ pub fn saving_fund_enabled() -> bool {
     )
 }
 
+/// `FEATURE_SHARING_V2=true` keeps Sharing budgets out of the personal ledger:
+/// their spending lives in the sharing service (expenses, split, settlement).
+pub fn sharing_v2_enabled() -> bool {
+    matches!(
+        std::env::var("FEATURE_SHARING_V2").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// Sharing budgets record group expenses in the sharing service; a manual
+/// income/expense entry there would sit outside the split and the balances.
+pub fn sharing_entry_allowed(
+    sharing_v2: bool,
+    budget_type: crate::pb::service::budget::BudgetType,
+) -> Result<(), tonic::Status> {
+    if sharing_v2 && budget_type == crate::pb::service::budget::BudgetType::Sharing {
+        return Err(tonic::Status::failed_precondition(
+            "sharing budgets record group expenses, not income/expense entries",
+        ));
+    }
+    Ok(())
+}
+
 /// Saving funds are changed through transfers and portfolio actions only.
 pub fn manual_entry_allowed(
     fund_enabled: bool,

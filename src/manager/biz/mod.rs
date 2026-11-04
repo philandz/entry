@@ -124,6 +124,10 @@ impl EntryBiz {
         crate::manager::validate::manual_entry_allowed(
             crate::manager::validate::saving_fund_enabled(),
             ctx.budget_type,
+        )?;
+        crate::manager::validate::sharing_entry_allowed(
+            crate::manager::validate::sharing_v2_enabled(),
+            ctx.budget_type,
         )
     }
 
