@@ -12,6 +12,8 @@ use crate::pb::service::entry::{
     BulkImportEntriesResponse,
     CancelRecurrenceRequest,
     Comment,
+    CreateDebtPaymentLegsRequest,
+    CreateDebtPaymentLegsResponse,
     CreateEntryRequest,
     // Recurring
     CreateRecurringEntryRequest,
@@ -49,6 +51,8 @@ use crate::pb::service::entry::{
     UpdateEntryRequest,
     UpdateRecurrenceRuleRequest,
     UpdateTransferRequest,
+    VoidDebtPaymentLegsRequest,
+    VoidDebtPaymentLegsResponse,
     VoidTransferLegRequest,
 };
 
@@ -165,6 +169,29 @@ impl EntryService for EntryHandler {
                 .create_transfer_leg(&req, user_type.as_deref())
                 .await?,
         ))
+    }
+
+    async fn create_debt_payment_legs(
+        &self,
+        request: Request<CreateDebtPaymentLegsRequest>,
+    ) -> Result<Response<CreateDebtPaymentLegsResponse>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_debt_payment_legs(&req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn void_debt_payment_legs(
+        &self,
+        request: Request<VoidDebtPaymentLegsRequest>,
+    ) -> Result<Response<VoidDebtPaymentLegsResponse>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.void_debt_payment_legs(&req).await?))
     }
 
     async fn void_transfer_leg(

@@ -39,3 +39,19 @@ fn sharing_rejects_manual_entries_when_sharing_v2_is_on() {
         assert!(sharing_entry_allowed(true, t).is_ok());
     }
 }
+
+#[test]
+fn debt_budget_rejects_manual_entries_when_debt_v2_is_on() {
+    use entry::manager::validate::debt_entry_allowed;
+    let e = debt_entry_allowed(true, BudgetType::Debt).unwrap_err();
+    assert_eq!(e.code(), tonic::Code::FailedPrecondition);
+    assert!(debt_entry_allowed(false, BudgetType::Debt).is_ok());
+    for t in [
+        BudgetType::Standard,
+        BudgetType::Saving,
+        BudgetType::Invest,
+        BudgetType::Sharing,
+    ] {
+        assert!(debt_entry_allowed(true, t).is_ok());
+    }
+}

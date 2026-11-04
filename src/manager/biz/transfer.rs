@@ -11,8 +11,9 @@ use crate::manager::repository::transfers::NewLeg;
 use crate::manager::validate;
 use crate::pb::service::budget::BudgetRole;
 use crate::pb::service::entry::{
-    CreateTransferLegRequest, CreateTransferRequest, Entry, EntryKind, Transfer,
-    UpdateTransferRequest, VoidTransferLegRequest,
+    CreateDebtPaymentLegsRequest, CreateDebtPaymentLegsResponse, CreateTransferLegRequest,
+    CreateTransferRequest, Entry, EntryKind, Transfer, UpdateTransferRequest,
+    VoidDebtPaymentLegsRequest, VoidDebtPaymentLegsResponse, VoidTransferLegRequest,
 };
 
 fn can_write(role: BudgetRole) -> bool {
@@ -165,13 +166,15 @@ impl EntryBiz {
         if legs.is_empty() {
             return Err(Status::not_found("Transfer not found"));
         }
-        if legs
-            .iter()
-            .any(|l| l.counterparty_kind.as_deref() == Some("fund_cash"))
-            || legs.len() != 2
+        if legs.iter().any(|l| {
+            matches!(
+                l.counterparty_kind.as_deref(),
+                Some("fund_cash") | Some("debt")
+            )
+        }) || legs.len() != 2
         {
             return Err(Status::failed_precondition(
-                "this transfer involves a fund; manage it from the fund",
+                "this transfer involves a fund or a debt; manage it from there",
             ));
         }
         for l in &legs {
@@ -308,5 +311,81 @@ impl EntryBiz {
             .await
             .map_err(Self::internal)?;
         Ok(map_entry(leg))
+    }
+
+    /// Internal: the Standard-side legs of one debt payment, in one DB transaction (plan DB6).
+    pub async fn create_debt_payment_legs(
+        &self,
+        req: &CreateDebtPaymentLegsRequest,
+        user_type: Option<&str>,
+    ) -> Result<CreateDebtPaymentLegsResponse, Status> {
+        validate::non_empty("group_id", &req.group_id)?;
+        validate::non_empty("actor_user_id", &req.actor_user_id)?;
+        validate::iso_date("entry_date", &req.entry_date)?;
+        validate::transfer_text(&req.description, None, "")?;
+        if req.principal_minor < 0 || req.interest_fee_minor < 0 {
+            return Err(Status::invalid_argument("amounts must not be negative"));
+        }
+        if req.principal_minor + req.interest_fee_minor <= 0 {
+            return Err(Status::invalid_argument(
+                "a payment needs a positive amount",
+            ));
+        }
+        if req.interest_fee_minor > 0 {
+            validate::non_empty("category_id", &req.category_id)?;
+        }
+        if req.from_budget_id == req.debt_budget_id {
+            return Err(Status::invalid_argument("budgets must differ"));
+        }
+        let from = self
+            .budget_ctx(&req.actor_user_id, &req.from_budget_id, user_type)
+            .await?;
+        if from.budget_type != crate::pb::service::budget::BudgetType::Standard {
+            return Err(Status::failed_precondition(
+                "debt payments are paid from a standard budget",
+            ));
+        }
+        // The debt budget is only a label here; its role is checked by the budget service.
+        let (principal_id, cost_id, replayed) = self
+            .repo
+            .create_debt_legs(&crate::manager::repository::transfers::NewDebtLegs {
+                group_id: &req.group_id,
+                from_budget_id: &req.from_budget_id,
+                debt_budget_id: &req.debt_budget_id,
+                principal_minor: req.principal_minor,
+                cost_minor: req.interest_fee_minor,
+                category_id: &req.category_id,
+                entry_date: &req.entry_date,
+                description: &req.description,
+                created_by: &req.actor_user_id,
+            })
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("already voided") {
+                    Status::failed_precondition("debt payment legs were already voided")
+                } else {
+                    Self::internal(e)
+                }
+            })?;
+        Ok(CreateDebtPaymentLegsResponse {
+            group_id: req.group_id.clone(),
+            principal_entry_id: principal_id,
+            cost_entry_id: cost_id,
+            replayed,
+        })
+    }
+
+    /// Internal compensation for the debt saga. Idempotent.
+    pub async fn void_debt_payment_legs(
+        &self,
+        req: &VoidDebtPaymentLegsRequest,
+    ) -> Result<VoidDebtPaymentLegsResponse, Status> {
+        validate::non_empty("group_id", &req.group_id)?;
+        let n = self
+            .repo
+            .void_debt_legs(&req.group_id, &req.from_budget_id)
+            .await
+            .map_err(Self::internal)?;
+        Ok(VoidDebtPaymentLegsResponse { voided: n as i32 })
     }
 }

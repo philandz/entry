@@ -249,6 +249,27 @@ pub fn sharing_entry_allowed(
     Ok(())
 }
 
+/// `FEATURE_DEBT_V2=true` turns Debt budgets into debt books: balances change through recorded
+/// debt payments (plan DB15), never through manual income/expense entries.
+pub fn debt_v2_enabled() -> bool {
+    matches!(
+        std::env::var("FEATURE_DEBT_V2").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+pub fn debt_entry_allowed(
+    debt_v2: bool,
+    budget_type: crate::pb::service::budget::BudgetType,
+) -> Result<(), tonic::Status> {
+    if debt_v2 && budget_type == crate::pb::service::budget::BudgetType::Debt {
+        return Err(tonic::Status::failed_precondition(
+            "debt budgets are debt books: record a payment on a debt account",
+        ));
+    }
+    Ok(())
+}
+
 /// Saving funds are changed through transfers and portfolio actions only.
 pub fn manual_entry_allowed(
     fund_enabled: bool,

@@ -128,6 +128,10 @@ impl EntryBiz {
         crate::manager::validate::sharing_entry_allowed(
             crate::manager::validate::sharing_v2_enabled(),
             ctx.budget_type,
+        )?;
+        crate::manager::validate::debt_entry_allowed(
+            crate::manager::validate::debt_v2_enabled(),
+            ctx.budget_type,
         )
     }
 
@@ -267,7 +271,8 @@ impl EntryBiz {
                 "Legs sum ({legs_sum}) must equal total_amount ({total_amount})"
             )));
         }
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
 
         let split_group_id = uuid::Uuid::new_v4().to_string();
         let mut created_legs = Vec::with_capacity(legs.len());
@@ -520,7 +525,8 @@ impl EntryBiz {
         budget_id: &str,
         rows: Vec<BulkImportRow>,
     ) -> Result<BulkImportEntriesResponse, Status> {
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
         let mut results = Vec::with_capacity(rows.len());
         let mut imported = 0i32;
         let mut errors = 0i32;

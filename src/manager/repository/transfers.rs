@@ -22,6 +22,28 @@ pub struct NewLeg<'a> {
     pub created_by: &'a str,
 }
 
+/// Parts of one debt payment (plan DB6): the principal moves to the debt budget as a transfer,
+/// interest and fees are an expense of the paying budget.
+pub struct NewDebtLegs<'a> {
+    pub group_id: &'a str,
+    pub from_budget_id: &'a str,
+    pub debt_budget_id: &'a str,
+    pub principal_minor: i64,
+    pub cost_minor: i64,
+    pub category_id: &'a str,
+    pub entry_date: &'a str,
+    pub description: &'a str,
+    pub created_by: &'a str,
+}
+
+/// Idempotency keys of the two legs; derived from the group id so a replay finds them again.
+pub fn debt_principal_key(group_id: &str) -> String {
+    format!("{group_id}:p")
+}
+pub fn debt_cost_key(group_id: &str) -> String {
+    format!("{group_id}:c")
+}
+
 const SELECT_LEG: &str = "SELECT e.id, e.budget_id, e.category_id, e.kind, e.amount_minor, e.description,
         DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
         e.tags, e.notes, e.is_recurring, e.recurrence_rule,
@@ -63,6 +85,104 @@ async fn insert_leg(
 }
 
 impl EntryRepository {
+    /// Writes the Standard-side legs of a debt payment in ONE transaction. Returns
+    /// `(principal_entry_id, cost_entry_id, replayed)`; empty ids for a skipped leg.
+    /// Idempotent on the group id: legs that already exist are returned, a voided group is refused.
+    pub async fn create_debt_legs(&self, l: &NewDebtLegs<'_>) -> Result<(String, String, bool)> {
+        let pkey = debt_principal_key(l.group_id);
+        let ckey = debt_cost_key(l.group_id);
+        let mut tx = self.pool.begin().await?;
+        // Serialise concurrent replays of the same payment.
+        let existing: Vec<(String, Option<String>, Option<chrono::NaiveDateTime>)> =
+            sqlx::query_as(
+                "SELECT id, idempotency_key, deleted_at FROM entries
+             WHERE budget_id = ? AND idempotency_key IN (?, ?) FOR UPDATE",
+            )
+            .bind(l.from_budget_id)
+            .bind(&pkey)
+            .bind(&ckey)
+            .fetch_all(&mut *tx)
+            .await?;
+        if !existing.is_empty() {
+            tx.rollback().await?;
+            if existing.iter().any(|(_, _, d)| d.is_some()) {
+                anyhow::bail!("debt payment legs were already voided");
+            }
+            let find = |k: &str| {
+                existing
+                    .iter()
+                    .find(|(_, key, _)| key.as_deref() == Some(k))
+                    .map(|(id, _, _)| id.clone())
+                    .unwrap_or_default()
+            };
+            return Ok((find(&pkey), find(&ckey), true));
+        }
+        let mut principal_id = String::new();
+        let mut cost_id = String::new();
+        if l.principal_minor > 0 {
+            principal_id = insert_leg(
+                &mut tx,
+                &NewLeg {
+                    budget_id: l.from_budget_id,
+                    kind: EntryKind::TransferOut,
+                    amount: l.principal_minor,
+                    entry_date: l.entry_date,
+                    description: l.description,
+                    notes: None,
+                    group_id: l.group_id,
+                    counterparty_budget_id: l.debt_budget_id,
+                    counterparty_kind: "debt",
+                    idempotency_key: Some(&pkey),
+                    created_by: l.created_by,
+                },
+            )
+            .await?;
+        }
+        if l.cost_minor > 0 {
+            let id = new_id();
+            let now = Utc::now().naive_utc();
+            sqlx::query(
+                "INSERT INTO entries (id, budget_id, category_id, kind, amount_minor, description, entry_date,
+                                      transfer_group_id, counterparty_budget_id, counterparty_kind, idempotency_key,
+                                      created_by, created_at, updated_at)
+                 VALUES (?, ?, ?, 'expense', ?, ?, ?, ?, ?, 'debt', ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(l.from_budget_id)
+            .bind(l.category_id)
+            .bind(l.cost_minor)
+            .bind(l.description)
+            .bind(l.entry_date)
+            .bind(l.group_id)
+            .bind(l.debt_budget_id)
+            .bind(&ckey)
+            .bind(l.created_by)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            cost_id = id;
+        }
+        tx.commit().await?;
+        Ok((principal_id, cost_id, false))
+    }
+
+    /// Compensation: soft-delete every live leg of the group in that budget. Returns the count.
+    pub async fn void_debt_legs(&self, group_id: &str, from_budget_id: &str) -> Result<u64> {
+        let now = Utc::now().naive_utc();
+        let r = sqlx::query(
+            "UPDATE entries SET deleted_at = ?, updated_at = ?
+             WHERE budget_id = ? AND transfer_group_id = ? AND counterparty_kind = 'debt' AND deleted_at IS NULL",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(from_budget_id)
+        .bind(group_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(r.rows_affected())
+    }
+
     /// Insert both legs atomically; returns `(out, in)` rows.
     pub async fn create_transfer_pair(
         &self,
