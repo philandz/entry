@@ -240,3 +240,19 @@ fn build_count_excludes_limit_offset() {
     assert!(!sql.contains("LIMIT"), "unexpected LIMIT in count: {sql}");
     assert!(!sql.contains("OFFSET"), "unexpected OFFSET in count: {sql}");
 }
+
+// ---------------------------------------------------------------------------
+// kind=transfer matches both legs without a bind
+// ---------------------------------------------------------------------------
+
+#[test]
+fn kind_transfer_matches_both_legs() {
+    let mut params = make_params();
+    params.kind = Some(cat("transfer"));
+    let (sql, binds) = EntryQueryBuilder::new(&params).apply_kind().build_count();
+    assert!(
+        sql.contains("e.kind IN ('transfer_out','transfer_in')"),
+        "{sql}"
+    );
+    assert!(binds.is_empty(), "{binds:?}");
+}

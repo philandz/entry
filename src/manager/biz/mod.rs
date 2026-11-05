@@ -12,6 +12,8 @@ use crate::pb::service::entry::{
     CreateSplitEntryResponse, Entry, EntryKind, EntrySummary, ListParams, PageMeta,
 };
 
+mod transfer;
+
 pub struct EntryBiz {
     pub repo: Arc<EntryRepository>,
     pub budget_client: Arc<Mutex<BudgetClient>>,
@@ -61,6 +63,24 @@ impl EntryBiz {
         Ok(())
     }
 
+    /// Transfer legs are managed as a pair by the transfer RPCs; editing or
+    /// deleting one leg through the generic entry RPCs would unbalance them.
+    async fn assert_not_transfer_leg(&self, entry_id: &str) -> Result<(), Status> {
+        let db = self
+            .repo
+            .get_entry(entry_id)
+            .await
+            .map_err(|_| Status::not_found("Entry not found"))?;
+        if db.transfer_group_id.is_some()
+            || crate::converters::is_transfer(crate::converters::kind_from_db(&db.kind))
+        {
+            return Err(Status::failed_precondition(
+                "this entry is part of a transfer; manage it via the transfer endpoints",
+            ));
+        }
+        Ok(())
+    }
+
     async fn assert_contributor(
         &self,
         budget_id: &str,
@@ -77,6 +97,42 @@ impl EntryBiz {
             ));
         }
         Ok(())
+    }
+
+    /// Contributor check for manual income/expense creation. Once the saving fund model is on,
+    /// Saving budgets only change through transfers and portfolio actions.
+    async fn assert_manual_entry_allowed(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
+        let ctx = self
+            .budget_client
+            .lock()
+            .await
+            .check_role_ctx(user_id, budget_id, user_type)
+            .await?;
+        if !matches!(
+            ctx.role,
+            BudgetRole::Owner | BudgetRole::Manager | BudgetRole::Contributor
+        ) {
+            return Err(Status::permission_denied(
+                "Requires Contributor role or higher",
+            ));
+        }
+        crate::manager::validate::manual_entry_allowed(
+            crate::manager::validate::saving_fund_enabled(),
+            ctx.budget_type,
+        )?;
+        crate::manager::validate::sharing_entry_allowed(
+            crate::manager::validate::sharing_v2_enabled(),
+            ctx.budget_type,
+        )?;
+        crate::manager::validate::debt_entry_allowed(
+            crate::manager::validate::debt_v2_enabled(),
+            ctx.budget_type,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -97,7 +153,8 @@ impl EntryBiz {
         notes: Option<&str>,
         user_type: Option<&str>,
     ) -> Result<Entry, Status> {
-        self.assert_contributor(budget_id, user_id, user_type)
+        crate::manager::validate::reject_transfer_kind(kind)?;
+        self.assert_manual_entry_allowed(budget_id, user_id, user_type)
             .await?;
         let db = self
             .repo
@@ -135,10 +192,12 @@ impl EntryBiz {
         notes: Option<&str>,
         recurrence_rule: &str,
     ) -> Result<Entry, Status> {
+        crate::manager::validate::reject_transfer_kind(kind)?;
         if recurrence_rule.is_empty() {
             return Err(Status::invalid_argument("recurrence_rule is required"));
         }
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
         let db = self
             .repo
             .create_entry_full(
@@ -202,6 +261,7 @@ impl EntryBiz {
         notes: Option<&str>,
         legs: Vec<crate::pb::service::entry::SplitLeg>,
     ) -> Result<CreateSplitEntryResponse, Status> {
+        crate::manager::validate::reject_transfer_kind(kind)?;
         if legs.len() < 2 {
             return Err(Status::invalid_argument("Split requires at least 2 legs"));
         }
@@ -211,7 +271,8 @@ impl EntryBiz {
                 "Legs sum ({legs_sum}) must equal total_amount ({total_amount})"
             )));
         }
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
 
         let split_group_id = uuid::Uuid::new_v4().to_string();
         let mut created_legs = Vec::with_capacity(legs.len());
@@ -344,6 +405,9 @@ impl EntryBiz {
         tags: Option<&[String]>,
         notes: Option<&str>,
     ) -> Result<Entry, Status> {
+        if let Some(k) = kind {
+            crate::manager::validate::reject_transfer_kind(k)?;
+        }
         let budget_id = self
             .repo
             .get_entry_budget_id(entry_id)
@@ -351,6 +415,7 @@ impl EntryBiz {
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
         self.assert_contributor(&budget_id, user_id, None).await?;
+        self.assert_not_transfer_leg(entry_id).await?;
         let db = self
             .repo
             .update_entry(
@@ -376,6 +441,7 @@ impl EntryBiz {
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Entry not found"))?;
         self.assert_contributor(&budget_id, user_id, None).await?;
+        self.assert_not_transfer_leg(entry_id).await?;
         self.repo
             .delete_entry(entry_id)
             .await
@@ -402,7 +468,50 @@ impl EntryBiz {
             budget_id: budget_id.to_string(),
             total_income: totals.total_income,
             total_expense: totals.total_expense,
-            current_balance: totals.total_income - totals.total_expense,
+            current_balance: totals.total_income - totals.total_expense + totals.transfer_net,
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Period totals (internal)
+    // -----------------------------------------------------------------------
+
+    /// Internal aggregation for other services. The caller is responsible for
+    /// having authorised the user against every budget in `budget_ids`.
+    pub async fn get_period_totals(
+        &self,
+        req: &crate::pb::service::entry::PeriodTotalsRequest,
+    ) -> Result<crate::pb::service::entry::PeriodTotalsResponse, Status> {
+        crate::manager::validate::period_totals_window(
+            &req.budget_ids,
+            &req.date_from,
+            &req.date_to,
+        )?;
+        let rows = self
+            .repo
+            .get_period_totals(
+                &req.budget_ids,
+                &req.date_from,
+                &req.date_to,
+                req.group_by_category,
+                req.group_by_day,
+            )
+            .await
+            .map_err(Self::internal)?;
+        Ok(crate::pb::service::entry::PeriodTotalsResponse {
+            rows: rows
+                .into_iter()
+                .map(|r| crate::pb::service::entry::PeriodTotalsRow {
+                    budget_id: r.budget_id,
+                    category_id: r.category_id,
+                    day: r.day,
+                    income: r.income,
+                    expense: r.expense,
+                    transfer_in: r.transfer_in,
+                    transfer_out: r.transfer_out,
+                    count: r.cnt,
+                })
+                .collect(),
         })
     }
 
@@ -416,13 +525,24 @@ impl EntryBiz {
         budget_id: &str,
         rows: Vec<BulkImportRow>,
     ) -> Result<BulkImportEntriesResponse, Status> {
-        self.assert_contributor(budget_id, user_id, None).await?;
+        self.assert_manual_entry_allowed(budget_id, user_id, None)
+            .await?;
         let mut results = Vec::with_capacity(rows.len());
         let mut imported = 0i32;
         let mut errors = 0i32;
 
         for (i, row) in rows.into_iter().enumerate() {
             let kind = EntryKind::try_from(row.kind).unwrap_or(EntryKind::Expense);
+            if crate::converters::is_transfer(kind) {
+                results.push(BulkImportRowResult {
+                    row_index: i as i32,
+                    success: false,
+                    error: "transfer entries cannot be bulk imported".to_string(),
+                    entry_id: String::new(),
+                });
+                errors += 1;
+                continue;
+            }
             if row.amount <= 0 || row.entry_date.is_empty() {
                 results.push(BulkImportRowResult {
                     row_index: i as i32,

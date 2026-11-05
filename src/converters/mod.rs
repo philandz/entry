@@ -22,6 +22,9 @@ pub struct DbEntry {
     pub next_occurrence: Option<String>,
     pub split_group_id: Option<String>,
     pub split_total: Option<i64>,
+    pub transfer_group_id: Option<String>,
+    pub counterparty_budget_id: Option<String>,
+    pub counterparty_kind: Option<String>,
     pub created_by: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
@@ -59,6 +62,8 @@ pub fn kind_to_db(k: EntryKind) -> &'static str {
     match k {
         EntryKind::Income => "income",
         EntryKind::Expense => "expense",
+        EntryKind::TransferOut => "transfer_out",
+        EntryKind::TransferIn => "transfer_in",
         EntryKind::Unspecified => "expense",
     }
 }
@@ -66,8 +71,25 @@ pub fn kind_to_db(k: EntryKind) -> &'static str {
 pub fn kind_from_db(s: &str) -> EntryKind {
     match s {
         "income" => EntryKind::Income,
-        _ => EntryKind::Expense,
+        "expense" => EntryKind::Expense,
+        "transfer_out" => EntryKind::TransferOut,
+        "transfer_in" => EntryKind::TransferIn,
+        other => {
+            // Legacy behaviour: unknown values were treated as expense. Keep it,
+            // but make the drift visible instead of silently miscounting.
+            tracing::warn!(
+                kind = other,
+                "unknown entries.kind in DB, treating as expense"
+            );
+            EntryKind::Expense
+        }
     }
+}
+
+/// True for the two transfer kinds. Used to keep transfers out of
+/// income/expense math and to reject them on the generic entry RPCs.
+pub fn is_transfer(k: EntryKind) -> bool {
+    matches!(k, EntryKind::TransferOut | EntryKind::TransferIn)
 }
 
 // ---------------------------------------------------------------------------
@@ -109,11 +131,20 @@ pub fn map_entry(db: DbEntry) -> Entry {
         next_occurrence: db.next_occurrence,
         split_group_id: db.split_group_id,
         split_total: db.split_total,
+        transfer_group_id: db.transfer_group_id,
+        counterparty_budget_id: db.counterparty_budget_id,
+        counterparty_kind: db.counterparty_kind,
     }
 }
 
 pub fn map_comment(db: DbComment) -> Comment {
     Comment {
+        id: db.id.clone(),
+        entry_id: db.entry_id,
+        body: db.comment_text,
+        created_by: db.user_id.clone(),
+        created_at: db.created_at.and_utc().timestamp(),
+        updated_at: db.updated_at.and_utc().timestamp(),
         base: Some(Base {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
@@ -127,13 +158,17 @@ pub fn map_comment(db: DbComment) -> Comment {
             owner_id: String::new(),
             status: 0,
         }),
-        entry_id: db.entry_id,
-        body: db.comment_text,
     }
 }
 
 pub fn map_attachment(db: DbAttachment) -> Attachment {
     Attachment {
+        id: db.id.clone(),
+        entry_id: db.entry_id,
+        file_id: db.file_id,
+        file_name: db.file_name,
+        created_by: db.user_id.clone(),
+        created_at: db.created_at.and_utc().timestamp(),
         base: Some(Base {
             id: db.id,
             created_at: db.created_at.and_utc().timestamp(),
@@ -144,8 +179,5 @@ pub fn map_attachment(db: DbAttachment) -> Attachment {
             owner_id: String::new(),
             status: 0,
         }),
-        entry_id: db.entry_id,
-        file_id: db.file_id,
-        file_name: db.file_name,
     }
 }

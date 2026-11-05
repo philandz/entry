@@ -1,3 +1,5 @@
+pub mod transfers;
+
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::MySqlPool;
@@ -22,6 +24,22 @@ pub struct ListResult {
 pub struct EntrySummaryTotals {
     pub total_income: i64,
     pub total_expense: i64,
+    /// Net of transfers (in − out); transfers are neutral for income/expense
+    /// but move the balance.
+    pub transfer_net: i64,
+}
+
+/// One aggregated row of `get_period_totals`.
+#[derive(Debug, sqlx::FromRow)]
+pub struct PeriodTotalsDbRow {
+    pub budget_id: String,
+    pub category_id: String,
+    pub day: String,
+    pub income: i64,
+    pub expense: i64,
+    pub transfer_in: i64,
+    pub transfer_out: i64,
+    pub cnt: i64,
 }
 
 /// A bind variable for dynamic query conditions — stored as String for sqlx query building.
@@ -93,7 +111,11 @@ impl<'a> EntryQueryBuilder<'a> {
 
     pub fn apply_kind(mut self) -> Self {
         if let Some(ref kind) = self.params.kind {
-            if !kind.is_empty() {
+            if kind == "transfer" {
+                // Both legs of a transfer; fixed literals, nothing to bind.
+                self.conditions
+                    .push("e.kind IN ('transfer_out','transfer_in')".to_string());
+            } else if !kind.is_empty() {
                 self.conditions.push("e.kind = ?".to_string());
                 self.binds.push(kind.clone());
             }
@@ -187,7 +209,7 @@ impl<'a> EntryQueryBuilder<'a> {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date, \
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule, \
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence, \
-                    e.split_group_id, e.split_total, \
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind, \
                     e.created_by, e.created_at, e.updated_at, e.deleted_at, \
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment \
              FROM entries e {where_clause} \
@@ -204,35 +226,9 @@ impl<'a> EntryQueryBuilder<'a> {
 impl EntryRepository {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::MySqlPool::connect(database_url).await?;
-        let mut migrator =
-            sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
-        migrator.set_ignore_missing(true);
-        if let Err(e) = migrator.run(&pool).await {
-            let err_str = format!("{}", e);
-            if err_str.contains("partially applied") {
-                tracing::warn!("Partial migration detected: {}", e);
-                if err_str.contains("20260507090228") {
-                    let has_avatar: bool = sqlx::query_scalar(
-                        "SELECT COUNT(*) > 0 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'avatar'"
-                    )
-                    .fetch_one(&pool)
-                    .await.unwrap_or(false);
-                    if has_avatar {
-                        sqlx::query(
-                            "INSERT IGNORE INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES (20260507090228, 'add_avatar_to_users', NOW(), true, 0x00, 0)"
-                        )
-                        .execute(&pool)
-                        .await.ok();
-                    }
-                }
-                sqlx::query("DELETE FROM _sqlx_migrations WHERE success = false")
-                    .execute(&pool)
-                    .await
-                    .ok();
-            } else {
-                return Err(anyhow::anyhow!("{}", e));
-            }
-        }
+        philand_storage::migrate::run_idempotent(&pool, "./migrations")
+            .await
+            .map_err(philand_storage::StorageError::Migrate)?;
         Ok(Self { pool })
     }
 
@@ -316,7 +312,7 @@ impl EntryRepository {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM entries e
@@ -609,7 +605,7 @@ impl EntryRepository {
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     0 AS has_attachment
              FROM entries e
@@ -645,13 +641,17 @@ impl EntryRepository {
         struct SummaryRow {
             total_income: i64,
             total_expense: i64,
+            transfer_net: i64,
         }
 
         let row: Option<SummaryRow> = sqlx::query_as(
             r#"
 SELECT
   CAST(COALESCE(SUM(CASE WHEN kind = 'income' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_income,
-  CAST(COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_expense
+  CAST(COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_minor ELSE 0 END), 0) AS SIGNED) AS total_expense,
+  CAST(COALESCE(SUM(CASE WHEN kind = 'transfer_in' THEN CAST(amount_minor AS SIGNED)
+                         WHEN kind = 'transfer_out' THEN -CAST(amount_minor AS SIGNED)
+                         ELSE 0 END), 0) AS SIGNED) AS transfer_net
 FROM entries
 WHERE BINARY budget_id = BINARY ?
   AND deleted_at IS NULL
@@ -665,12 +665,65 @@ WHERE BINARY budget_id = BINARY ?
             EntrySummaryTotals {
                 total_income: 0,
                 total_expense: 0,
+                transfer_net: 0,
             },
             |r| EntrySummaryTotals {
                 total_income: r.total_income,
                 total_expense: r.total_expense,
+                transfer_net: r.transfer_net,
             },
         ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Period totals (consumed by budget / category / insight over gRPC)
+    // -----------------------------------------------------------------------
+
+    /// Aggregates income / expense / transfers for `budget_ids` over
+    /// `[date_from, date_to)`. `date_*` are local calendar dates.
+    pub async fn get_period_totals(
+        &self,
+        budget_ids: &[String],
+        date_from: &str,
+        date_to: &str,
+        group_by_category: bool,
+        group_by_day: bool,
+    ) -> Result<Vec<PeriodTotalsDbRow>> {
+        let placeholders = budget_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let cat_expr = if group_by_category {
+            "COALESCE(e.category_id, '')"
+        } else {
+            "''"
+        };
+        let day_expr = if group_by_day {
+            "DATE_FORMAT(e.entry_date, '%Y-%m-%d')"
+        } else {
+            "''"
+        };
+        let sql = format!(
+            "SELECT e.budget_id AS budget_id, \
+                    {cat_expr} AS category_id, \
+                    {day_expr} AS day, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'income' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS income, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS expense, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_in' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_in, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_out' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_out, \
+                    CAST(COUNT(*) AS SIGNED) AS cnt \
+             FROM entries e \
+             WHERE e.deleted_at IS NULL \
+               AND e.budget_id IN ({placeholders}) \
+               AND e.entry_date >= ? AND e.entry_date < ? \
+             GROUP BY 1, 2, 3 \
+             ORDER BY 1, 2, 3"
+        );
+        let mut q = sqlx::query_as::<_, PeriodTotalsDbRow>(&sql);
+        for id in budget_ids {
+            q = q.bind(id);
+        }
+        Ok(q.bind(date_from)
+            .bind(date_to)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     // -----------------------------------------------------------------------
@@ -683,7 +736,7 @@ WHERE BINARY budget_id = BINARY ?
                     DATE_FORMAT(e.entry_date, '%Y-%m-%d') AS entry_date,
                     e.tags, e.notes, e.is_recurring, e.recurrence_rule,
                     DATE_FORMAT(e.next_occurrence, '%Y-%m-%d') AS next_occurrence,
-                    e.split_group_id, e.split_total,
+                    e.split_group_id, e.split_total, e.transfer_group_id, e.counterparty_budget_id, e.counterparty_kind,
                     e.created_by, e.created_at, e.updated_at, e.deleted_at,
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment
              FROM entries e

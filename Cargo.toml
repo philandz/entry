@@ -23,6 +23,7 @@ prost-types = "0.13"
 tokio-stream = "0.1"
 philand_logging    = { package = "logging",     path = "../libs/logging" }
 philand_configs    = { package = "configs",     path = "../libs/configs" }
+philand_storage    = { package = "storage",     path = "../libs/storage" }
 philand_application = { package = "application", path = "../libs/application" }
 philand_time       = { package = "time",        path = "../libs/time" }
 philand_random     = { package = "random",      path = "../libs/random" }

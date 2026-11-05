@@ -12,16 +12,22 @@ use crate::pb::service::entry::{
     BulkImportEntriesResponse,
     CancelRecurrenceRequest,
     Comment,
+    CreateDebtPaymentLegsRequest,
+    CreateDebtPaymentLegsResponse,
     CreateEntryRequest,
     // Recurring
     CreateRecurringEntryRequest,
     // Split
     CreateSplitEntryRequest,
     CreateSplitEntryResponse,
+    CreateTransferLegRequest,
+    CreateTransferRequest,
     DeleteCommentRequest,
     DeleteCommentResponse,
     DeleteEntryRequest,
     DeleteEntryResponse,
+    DeleteTransferRequest,
+    DeleteTransferResponse,
     EditCommentRequest,
     Entry,
     EntryKind,
@@ -37,10 +43,17 @@ use crate::pb::service::entry::{
     ListEntriesResponse,
     ListSplitLegsRequest,
     ListSplitLegsResponse,
+    PeriodTotalsRequest,
+    PeriodTotalsResponse,
     RemoveAttachmentRequest,
     RemoveAttachmentResponse,
+    Transfer,
     UpdateEntryRequest,
     UpdateRecurrenceRuleRequest,
+    UpdateTransferRequest,
+    VoidDebtPaymentLegsRequest,
+    VoidDebtPaymentLegsResponse,
+    VoidTransferLegRequest,
 };
 
 pub struct EntryHandler {
@@ -91,6 +104,103 @@ impl EntryService for EntryHandler {
             )
             .await?;
         Ok(Response::new(entry))
+    }
+
+    async fn get_period_totals(
+        &self,
+        request: Request<PeriodTotalsRequest>,
+    ) -> Result<Response<PeriodTotalsResponse>, Status> {
+        // Internal RPC: still require the caller identity header, like every other RPC.
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.get_period_totals(&req).await?))
+    }
+
+    async fn create_transfer(
+        &self,
+        request: Request<CreateTransferRequest>,
+    ) -> Result<Response<Transfer>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_transfer(&user_id, &req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn update_transfer(
+        &self,
+        request: Request<UpdateTransferRequest>,
+    ) -> Result<Response<Transfer>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .update_transfer(&user_id, &req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn delete_transfer(
+        &self,
+        request: Request<DeleteTransferRequest>,
+    ) -> Result<Response<DeleteTransferResponse>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        self.biz
+            .delete_transfer(&user_id, &req.group_id, user_type.as_deref())
+            .await?;
+        Ok(Response::new(DeleteTransferResponse { success: true }))
+    }
+
+    async fn create_transfer_leg(
+        &self,
+        request: Request<CreateTransferLegRequest>,
+    ) -> Result<Response<Entry>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_transfer_leg(&req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn create_debt_payment_legs(
+        &self,
+        request: Request<CreateDebtPaymentLegsRequest>,
+    ) -> Result<Response<CreateDebtPaymentLegsResponse>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz
+                .create_debt_payment_legs(&req, user_type.as_deref())
+                .await?,
+        ))
+    }
+
+    async fn void_debt_payment_legs(
+        &self,
+        request: Request<VoidDebtPaymentLegsRequest>,
+    ) -> Result<Response<VoidDebtPaymentLegsResponse>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.void_debt_payment_legs(&req).await?))
+    }
+
+    async fn void_transfer_leg(
+        &self,
+        request: Request<VoidTransferLegRequest>,
+    ) -> Result<Response<Entry>, Status> {
+        validate::user_id_from_metadata(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(self.biz.void_transfer_leg(&req).await?))
     }
 
     async fn get_entry(
