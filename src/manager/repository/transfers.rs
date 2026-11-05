@@ -119,6 +119,9 @@ impl EntryRepository {
         }
         let mut principal_id = String::new();
         let mut cost_id = String::new();
+        // The two legs show up as separate rows in the paying budget: tell them apart.
+        let principal_desc = format!("{} — gốc", l.description);
+        let cost_desc = format!("{} — lãi & phí", l.description);
         if l.principal_minor > 0 {
             principal_id = insert_leg(
                 &mut tx,
@@ -127,7 +130,7 @@ impl EntryRepository {
                     kind: EntryKind::TransferOut,
                     amount: l.principal_minor,
                     entry_date: l.entry_date,
-                    description: l.description,
+                    description: &principal_desc,
                     notes: None,
                     group_id: l.group_id,
                     counterparty_budget_id: l.debt_budget_id,
@@ -151,7 +154,7 @@ impl EntryRepository {
             .bind(l.from_budget_id)
             .bind(l.category_id)
             .bind(l.cost_minor)
-            .bind(l.description)
+            .bind(&cost_desc)
             .bind(l.entry_date)
             .bind(l.group_id)
             .bind(l.debt_budget_id)
