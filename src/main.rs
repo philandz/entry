@@ -34,9 +34,10 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to init repository: {e}"))?;
     tracing::info!("Storage initialized");
 
-    let budget_client = BudgetClient::connect(&budget_url)
+    let budget_channel = philand_application::connect::connect_default(&budget_url)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to budget gRPC: {e}"))?;
+    let budget_client = BudgetClient::from_channel(budget_channel);
     tracing::info!("Budget gRPC client connected to {}", budget_url);
 
     let repo = Arc::new(repo);
