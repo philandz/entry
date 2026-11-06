@@ -256,3 +256,24 @@ fn kind_transfer_matches_both_legs() {
     );
     assert!(binds.is_empty(), "{binds:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Stable paging: rows that share the sort key need a total order, otherwise a row can
+// appear on two pages (or on none) when two pages are fetched at different times.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn data_query_has_a_total_order_after_the_sort_column() {
+    let params = make_params();
+    let builder = EntryQueryBuilder::new(&params);
+    for (col, dir) in [
+        ("e.entry_date", "DESC"),
+        ("e.entry_date", "ASC"),
+        ("e.amount_minor", "DESC"),
+        ("e.description", "ASC"),
+    ] {
+        let (sql, _) = builder.build_data(col, dir, 30, 0);
+        let want = format!("ORDER BY {col} {dir}, e.created_at {dir}, e.id {dir}");
+        assert!(sql.contains(&want), "expected `{want}` in: {sql}");
+    }
+}

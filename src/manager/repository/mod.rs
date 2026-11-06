@@ -213,7 +213,7 @@ impl<'a> EntryQueryBuilder<'a> {
                     e.created_by, e.created_at, e.updated_at, e.deleted_at, \
                     (SELECT COUNT(*) > 0 FROM entry_attachments a WHERE a.entry_id = e.id) AS has_attachment \
              FROM entries e {where_clause} \
-             ORDER BY {sort_col} {sort_dir} \
+             ORDER BY {sort_col} {sort_dir}, e.created_at {sort_dir}, e.id {sort_dir} \
              LIMIT ? OFFSET ?"
         );
         let mut binds = self.binds.clone();
