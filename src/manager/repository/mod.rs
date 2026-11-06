@@ -211,11 +211,19 @@ impl<'a> EntryQueryBuilder<'a> {
         self
     }
 
+    /// `tags` is a comma-separated list; an entry must carry EVERY listed tag (AND).
+    /// Tags match exactly (not as substrings): tags are stored comma-joined, so FIND_IN_SET.
     pub fn apply_tags(mut self) -> Self {
         if let Some(ref tags) = self.params.tags {
-            if !tags.is_empty() {
-                self.conditions.push("e.tags LIKE ?".to_string());
-                self.binds.push(format!("%{tags}%"));
+            for tag in tags
+                .split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .take(20)
+            {
+                self.conditions
+                    .push("FIND_IN_SET(?, e.tags) > 0".to_string());
+                self.binds.push(tag.to_string());
             }
         }
         self

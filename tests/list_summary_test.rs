@@ -154,3 +154,60 @@ async fn search_covers_notes_tags_amount_and_summary_ignores_paging() {
     let s = filtered.summary.unwrap();
     assert_eq!((s.count, s.income, s.expense), (3, 0, 1_550_010));
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL (MySQL); run with --ignored"]
+async fn tags_and_amount_range_filter_and_sort_in_sql() {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let repo = EntryRepository::new(&url).await.expect("repo + migrations");
+    let bud = uuid();
+    let u = "user-1";
+    let t = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    for (amt, d, tags) in [
+        (100, "a", t(&["lunch", "work"])),
+        (500, "b", t(&["lunch"])),
+        (900, "c", t(&["lunchbox", "work"])),
+        (300, "d", t(&[])),
+    ] {
+        repo.create_entry(&bud, None, Expense, amt, d, "2026-11-01", &tags, None, u)
+            .await
+            .unwrap();
+    }
+    let list = |p: ListParams| {
+        let (repo, bud) = (&repo, bud.clone());
+        async move {
+            repo.list_entries(Some(&bud), &[], None, &p)
+                .await
+                .unwrap()
+                .entries
+                .iter()
+                .map(|e| e.description.clone())
+                .collect::<Vec<_>>()
+        }
+    };
+    let base = || ListParams {
+        page: Some(1),
+        page_size: Some(30),
+        ..Default::default()
+    };
+
+    // exact tag, not a substring ("lunch" must not match "lunchbox")
+    let mut p = base();
+    p.tags = Some("lunch".into());
+    p.sort_by = Some("amount".into());
+    p.sort_dir = Some("asc".into());
+    assert_eq!(list(p).await, vec!["a", "b"]);
+
+    // several tags = AND
+    let mut p = base();
+    p.tags = Some("lunch,work".into());
+    assert_eq!(list(p).await, vec!["a"]);
+
+    // inclusive amount bounds, sorted by amount desc
+    let mut p = base();
+    p.amount_min = Some(300);
+    p.amount_max = Some(900);
+    p.sort_by = Some("amount".into());
+    p.sort_dir = Some("desc".into());
+    assert_eq!(list(p).await, vec!["c", "b", "d"]);
+}

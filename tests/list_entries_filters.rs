@@ -114,26 +114,23 @@ fn member_ids_empty_slice_adds_nothing() {
 }
 
 // ---------------------------------------------------------------------------
-// tags bound correctly → "e.tags LIKE ?" + 1 bind
+// tags: comma-separated, every tag required, exact match via FIND_IN_SET
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tags_builds_like_condition() {
+fn tags_require_every_listed_tag_exactly() {
     let mut params = make_params();
-    params.tags = Some(cat("lunch"));
+    params.tags = Some(cat("lunch, work ,"));
 
     let builder = EntryQueryBuilder::new(&params).apply_tags();
     let (sql, binds) = builder.build_count();
 
-    assert!(
-        sql.contains("e.tags LIKE ?"),
-        "expected LIKE clause in: {sql}"
+    assert_eq!(
+        sql.matches("FIND_IN_SET(?, e.tags) > 0").count(),
+        2,
+        "{sql}"
     );
-    assert_eq!(binds.len(), 1, "expected 1 bind, got: {binds:?}");
-    assert!(
-        binds.contains(&cat("%lunch%")),
-        "expected %lunch% bind, got: {binds:?}"
-    );
+    assert_eq!(binds, vec![cat("lunch"), cat("work")]);
 }
 
 // ---------------------------------------------------------------------------
