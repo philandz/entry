@@ -236,7 +236,7 @@ impl EntryService for EntryHandler {
         validate::range_max_days(
             params.date_from.as_deref().unwrap_or(""),
             params.date_to.as_deref().unwrap_or(""),
-            30,
+            validate::LIST_MAX_RANGE_DAYS,
         )?;
         validate::repeated_ids(&params.category_ids, "category_ids", 50)?;
         validate::repeated_ids(&params.member_ids, "member_ids", 50)?;
