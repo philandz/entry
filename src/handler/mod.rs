@@ -241,7 +241,7 @@ impl EntryService for EntryHandler {
         validate::repeated_ids(&params.category_ids, "category_ids", 50)?;
         validate::repeated_ids(&params.member_ids, "member_ids", 50)?;
 
-        let (entries, meta) = self
+        let (entries, meta, summary) = self
             .biz
             .list_entries(
                 &user_id,
@@ -254,6 +254,7 @@ impl EntryService for EntryHandler {
         Ok(Response::new(ListEntriesResponse {
             entries,
             meta: Some(meta),
+            summary,
         }))
     }
 

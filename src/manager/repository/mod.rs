@@ -5,7 +5,7 @@ use chrono::Utc;
 use sqlx::MySqlPool;
 
 use crate::converters::{kind_to_db, DbAttachment, DbComment, DbEntry};
-use crate::pb::service::entry::{EntryKind, ListParams, PageMeta};
+use crate::pb::service::entry::{EntryKind, ListParams, ListSummary, PageMeta};
 
 pub struct EntryRepository {
     pool: MySqlPool,
@@ -18,6 +18,7 @@ fn new_id() -> String {
 pub struct ListResult {
     pub entries: Vec<DbEntry>,
     pub meta: PageMeta,
+    pub summary: Option<ListSummary>,
 }
 
 #[derive(Debug)]
@@ -40,6 +41,25 @@ pub struct PeriodTotalsDbRow {
     pub transfer_in: i64,
     pub transfer_out: i64,
     pub cnt: i64,
+}
+
+/// Escape LIKE wildcards so user text is matched literally.
+fn escape_like(q: &str) -> String {
+    q.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// Parse "1.500.000" / "1,500,000" / "50000" into minor units; None for anything else.
+fn parse_amount_query(q: &str) -> Option<i64> {
+    let digits: String = q
+        .chars()
+        .filter(|c| !matches!(c, '.' | ',' | ' ' | '\u{a0}'))
+        .collect();
+    if digits.is_empty() || digits.len() > 15 || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// A bind variable for dynamic query conditions — stored as String for sqlx query building.
@@ -99,11 +119,22 @@ impl<'a> EntryQueryBuilder<'a> {
         self
     }
 
+    /// Free-text search over description, notes and tags. A query that looks
+    /// like an amount ("1.500.000", "50,000") also matches that exact amount.
     pub fn apply_text(mut self) -> Self {
         if let Some(ref q) = self.params.q {
+            let q = q.trim();
             if !q.is_empty() {
-                self.conditions.push("e.description LIKE ?".to_string());
-                self.binds.push(format!("%{q}%"));
+                let like = format!("%{}%", escape_like(q));
+                let mut cond =
+                    "(e.description LIKE ? OR e.notes LIKE ? OR e.tags LIKE ?".to_string();
+                self.binds.extend([like.clone(), like.clone(), like]);
+                if let Some(amount) = parse_amount_query(q) {
+                    cond.push_str(" OR e.amount_minor = ?");
+                    self.binds.push(amount.to_string());
+                }
+                cond.push(')');
+                self.conditions.push(cond);
             }
         }
         self
@@ -193,6 +224,19 @@ impl<'a> EntryQueryBuilder<'a> {
     pub fn build_count(&self) -> (String, Vec<SqlBind>) {
         let where_clause = format!("WHERE {}", self.conditions.join(" AND "));
         let sql = format!("SELECT COUNT(*) as cnt FROM entries e {where_clause}");
+        (sql, self.binds.clone())
+    }
+
+    pub fn build_summary(&self) -> (String, Vec<SqlBind>) {
+        let where_clause = format!("WHERE {}", self.conditions.join(" AND "));
+        let sql = format!(
+            "SELECT CAST(COUNT(*) AS SIGNED) AS cnt, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'income' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS income, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS expense, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_in' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_in, \
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'transfer_out' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS transfer_out \
+             FROM entries e {where_clause}"
+        );
         (sql, self.binds.clone())
     }
 
@@ -375,8 +419,28 @@ impl EntryRepository {
         }
         let entries = data_q.fetch_all(&self.pool).await?;
 
+        let summary = if params.include_summary.unwrap_or(false) {
+            let (sql, binds) = qb.build_summary();
+            let mut q = sqlx::query(&sql);
+            for b in &binds {
+                q = q.bind(b);
+            }
+            let row = q.fetch_one(&self.pool).await?;
+            let get = |c: &str| sqlx::Row::try_get::<i64, _>(&row, c).unwrap_or(0);
+            Some(ListSummary {
+                count: get("cnt"),
+                income: get("income"),
+                expense: get("expense"),
+                transfer_in: get("transfer_in"),
+                transfer_out: get("transfer_out"),
+            })
+        } else {
+            None
+        };
+
         let total_pages = ((total as f64) / (page_size as f64)).ceil() as i32;
         Ok(ListResult {
+            summary,
             entries,
             meta: PageMeta {
                 page,
@@ -746,5 +810,40 @@ WHERE BINARY budget_id = BINARY ?
         .bind(split_group_id)
         .fetch_all(&self.pool).await?;
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn amount_queries_parse_with_separators() {
+        assert_eq!(parse_amount_query("1.500.000"), Some(1_500_000));
+        assert_eq!(parse_amount_query("50,000"), Some(50_000));
+        assert_eq!(parse_amount_query("cafe"), None);
+        assert_eq!(parse_amount_query("12a"), None);
+        assert_eq!(parse_amount_query(""), None);
+    }
+
+    #[test]
+    fn like_wildcards_are_escaped() {
+        assert_eq!(escape_like("50%_off"), "50\\%\\_off");
+    }
+
+    #[test]
+    fn text_search_covers_notes_tags_and_amount() {
+        let params = ListParams {
+            q: Some("2.000".into()),
+            ..Default::default()
+        };
+        let qb = EntryQueryBuilder::new(&params).apply_text();
+        let (sql, binds) = qb.build_count();
+        assert!(sql.contains("e.notes LIKE ?") && sql.contains("e.tags LIKE ?"));
+        assert!(sql.contains("e.amount_minor = ?"));
+        assert_eq!(binds.last().map(String::as_str), Some("2000"));
+        let (ssql, sbinds) = qb.build_summary();
+        assert!(ssql.contains("transfer_out") && !ssql.contains("LIMIT"));
+        assert_eq!(sbinds, binds);
     }
 }
