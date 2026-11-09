@@ -145,3 +145,15 @@ fn repeated_ids_reports_field_name_in_error() {
     let err = result.unwrap_err();
     assert!(err.message().contains("member_ids"));
 }
+
+#[test]
+fn list_range_allows_a_year_and_refuses_more() {
+    use entry::manager::validate::LIST_MAX_RANGE_DAYS;
+    assert_eq!(LIST_MAX_RANGE_DAYS, 366);
+    // 2026-01-01 .. 2027-01-02 is 366 days apart
+    assert!(range_max_days("2026-01-01", "2027-01-02", LIST_MAX_RANGE_DAYS).is_ok());
+    assert!(range_max_days("2026-01-01", "2027-01-03", LIST_MAX_RANGE_DAYS).is_err());
+    // open ended is fine: the list is paginated
+    assert!(range_max_days("2026-01-01", "", LIST_MAX_RANGE_DAYS).is_ok());
+    assert!(range_max_days("", "", LIST_MAX_RANGE_DAYS).is_ok());
+}
