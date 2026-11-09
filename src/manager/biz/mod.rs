@@ -9,7 +9,7 @@ use crate::manager::repository::EntryRepository;
 use crate::pb::service::budget::BudgetRole;
 use crate::pb::service::entry::{
     Attachment, BulkImportEntriesResponse, BulkImportRow, BulkImportRowResult, Comment,
-    CreateSplitEntryResponse, Entry, EntryKind, EntrySummary, ListParams, PageMeta,
+    CreateSplitEntryResponse, Entry, EntryKind, EntrySummary, ListParams, ListSummary, PageMeta,
 };
 
 mod transfer;
@@ -361,7 +361,7 @@ impl EntryBiz {
         budget_ids: &[String],
         params: &ListParams,
         user_type: Option<&str>,
-    ) -> Result<(Vec<Entry>, PageMeta), Status> {
+    ) -> Result<(Vec<Entry>, PageMeta, Option<ListSummary>), Status> {
         if let Some(bid) = budget_id {
             self.assert_member(bid, user_id, user_type).await?;
             let result = self
@@ -372,6 +372,7 @@ impl EntryBiz {
             Ok((
                 result.entries.into_iter().map(map_entry).collect(),
                 result.meta,
+                result.summary,
             ))
         } else {
             // Cross-budget path: validate that the user is a member of each requested
@@ -388,6 +389,7 @@ impl EntryBiz {
             Ok((
                 result.entries.into_iter().map(map_entry).collect(),
                 result.meta,
+                result.summary,
             ))
         }
     }

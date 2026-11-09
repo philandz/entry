@@ -77,6 +77,10 @@ pub fn date_range(date_from: &str, date_to: &str) -> Result<(), Status> {
     }
 }
 
+/// Longest `date_from..date_to` span a list query accepts (a year, plus a leap day). An empty end
+/// is allowed: the list is paginated, so an open range is bounded by page size, not by dates.
+pub const LIST_MAX_RANGE_DAYS: u32 = 366;
+
 pub fn range_max_days(date_from: &str, date_to: &str, max_days: u32) -> Result<(), Status> {
     if date_from.is_empty() || date_to.is_empty() {
         return Ok(());
