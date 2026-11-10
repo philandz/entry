@@ -12,6 +12,9 @@ pub mod pb {
         pub mod budget {
             tonic::include_proto!("service.budget");
         }
+        pub mod notification {
+            tonic::include_proto!("service.notification");
+        }
     }
     pub mod common {
         pub mod base {
