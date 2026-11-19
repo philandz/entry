@@ -17,6 +17,8 @@ mod transfer;
 pub struct EntryBiz {
     pub repo: Arc<EntryRepository>,
     pub budget_client: Arc<Mutex<BudgetClient>>,
+    /// Set only when `NOTIFY_PUBLISH_ENABLED`; `None` = behaviour as before.
+    notifier: Option<Arc<crate::manager::notifier::Notifier>>,
 }
 
 impl EntryBiz {
@@ -24,13 +26,21 @@ impl EntryBiz {
         Self {
             repo: Arc::new(repo),
             budget_client: Arc::new(Mutex::new(budget_client)),
+            notifier: None,
         }
+    }
+
+    /// Publishes comment notifications through the notify outbox.
+    pub fn with_notifier(mut self, notifier: crate::manager::notifier::Notifier) -> Self {
+        self.notifier = Some(Arc::new(notifier));
+        self
     }
 
     pub fn new_with_arc(repo: Arc<EntryRepository>, budget_client: BudgetClient) -> Self {
         Self {
             repo,
             budget_client: Arc::new(Mutex::new(budget_client)),
+            notifier: None,
         }
     }
 
@@ -629,7 +639,27 @@ impl EntryBiz {
             .add_comment(entry_id, body, user_id)
             .await
             .map_err(Self::internal)?;
+        self.notify_comment(&budget_id, entry_id, user_id, body)
+            .await;
         Ok(map_comment(db))
+    }
+
+    /// Tells the rest of the thread (entry creator + earlier commenters) about a new comment.
+    /// Never fails the request.
+    async fn notify_comment(&self, budget_id: &str, entry_id: &str, author: &str, body: &str) {
+        let Some(n) = &self.notifier else { return };
+        let mut thread = self
+            .repo
+            .list_comment_authors(entry_id)
+            .await
+            .unwrap_or_default();
+        if let Ok(Some(creator)) = self.repo.get_entry_creator(entry_id).await {
+            thread.push(creator);
+        }
+        n.send(crate::manager::notifier::comment_added_event(
+            budget_id, entry_id, author, thread, body,
+        ))
+        .await;
     }
 
     pub async fn edit_comment(

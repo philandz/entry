@@ -1,6 +1,7 @@
 use axum::{routing::get, Json, Router};
 use entry::handler::EntryHandler;
 use entry::manager::biz::EntryBiz;
+use entry::manager::client::notification::GrpcNotificationSink;
 use entry::manager::client::BudgetClient;
 use entry::manager::repository::EntryRepository;
 use entry::manager::scheduler;
@@ -49,7 +50,30 @@ async fn main() -> anyhow::Result<()> {
     });
     tracing::info!("Recurring entry scheduler started");
 
-    let biz = Arc::new(EntryBiz::new_with_arc(repo, budget_client));
+    // Notifications (plan 2026-11-09): off unless NOTIFY_PUBLISH_ENABLED.
+    let (_notify_shutdown_tx, notify_shutdown_rx) = tokio::sync::watch::channel(false);
+    let notify_cfg = philand_configs::NotifyPublisherConfig::from_env()
+        .map_err(|e| anyhow::anyhow!("Failed to load notification publisher config: {e}"))?;
+    let mut biz = EntryBiz::new_with_arc(repo, budget_client);
+    if notify_cfg.enabled {
+        let pool = sqlx::MySqlPool::connect(&database_url)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open notify outbox pool: {e}"))?;
+        let outbox = philand_event::MySqlOutbox::new(pool.clone(), "entry_notify_outbox")?;
+        let sink = Arc::new(GrpcNotificationSink::new(
+            &notify_cfg.notification_grpc_url,
+            &notify_cfg.internal_token,
+        )?);
+        tokio::spawn(philand_event::run_outbox_drainer(
+            Arc::new(outbox.clone()),
+            sink,
+            philand_event::DrainerConfig::from_env(),
+            notify_shutdown_rx,
+        ));
+        biz = biz.with_notifier(entry::manager::notifier::Notifier::new(outbox, pool));
+        tracing::info!("notification publishing enabled");
+    }
+    let biz = Arc::new(biz);
     let grpc_handler = EntryHandler::new(biz);
 
     let grpc_addr: SocketAddr = format!("{grpc_host}:{grpc_port}").parse()?;
