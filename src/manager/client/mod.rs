@@ -1,3 +1,5 @@
+pub mod notification;
+
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 use tonic::{Request, Status};

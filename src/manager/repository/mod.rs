@@ -544,6 +544,27 @@ impl EntryRepository {
         Ok(row.map(|(v,)| v))
     }
 
+    /// User who created the entry.
+    pub async fn get_entry_creator(&self, entry_id: &str) -> Result<Option<String>> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT created_by FROM entries WHERE id = ? AND deleted_at IS NULL")
+                .bind(entry_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(v,)| v))
+    }
+
+    /// Distinct authors of the live comments on an entry.
+    pub async fn list_comment_authors(&self, entry_id: &str) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT user_id FROM entry_comments WHERE entry_id = ? AND deleted_at IS NULL",
+        )
+        .bind(entry_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(v,)| v).collect())
+    }
+
     // -----------------------------------------------------------------------
     // Comments
     // -----------------------------------------------------------------------
