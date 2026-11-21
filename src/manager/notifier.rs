@@ -45,6 +45,7 @@ pub fn excerpt(body: &str) -> String {
 pub fn comment_added_event(
     budget_id: &str,
     entry_id: &str,
+    entry_description: &str,
     author: &str,
     thread_members: Vec<String>,
     body: &str,
@@ -59,10 +60,14 @@ pub fn comment_added_event(
     .severity(NotifySeverity::Info)
     .actor(author)
     .budget(budget_id)
-    .link(format!("/budgets/{budget_id}"))
+    // Opens the transaction (and its comments) in the budget's transactions tab.
+    .link(format!(
+        "/budgets/{budget_id}?tab=transactions&tx={entry_id}"
+    ))
     .group_key(format!("entry_comment:{entry_id}"))
     .params(serde_json::json!({
         "entry_id": entry_id,
+        "entry_description": excerpt(entry_description),
         "excerpt": excerpt(body),
     }))
     .without_actor()

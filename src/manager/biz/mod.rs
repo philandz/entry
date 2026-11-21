@@ -653,11 +653,18 @@ impl EntryBiz {
             .list_comment_authors(entry_id)
             .await
             .unwrap_or_default();
-        if let Ok(Some(creator)) = self.repo.get_entry_creator(entry_id).await {
-            thread.push(creator);
+        let mut description = String::new();
+        if let Ok(entry) = self.repo.get_entry(entry_id).await {
+            thread.push(entry.created_by);
+            description = entry.description;
         }
         n.send(crate::manager::notifier::comment_added_event(
-            budget_id, entry_id, author, thread, body,
+            budget_id,
+            entry_id,
+            &description,
+            author,
+            thread,
+            body,
         ))
         .await;
     }
