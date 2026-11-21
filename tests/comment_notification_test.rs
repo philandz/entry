@@ -8,6 +8,7 @@ fn thread_members_exclude_the_author_and_duplicates() {
     let ev = comment_added_event(
         "b1",
         "e1",
+        "Tiền điện",
         "u2",
         vec!["u1".into(), "u2".into(), "u3".into(), "u1".into()],
         "looks good",
@@ -16,13 +17,17 @@ fn thread_members_exclude_the_author_and_duplicates() {
     assert_eq!(ev.recipient_user_ids, vec!["u1", "u3"]);
     assert_eq!(ev.actor_user_id.as_deref(), Some("u2"));
     assert_eq!(ev.group_key.as_deref(), Some("entry_comment:e1"));
-    assert_eq!(ev.link.as_deref(), Some("/budgets/b1"));
+    assert_eq!(
+        ev.link.as_deref(),
+        Some("/budgets/b1?tab=transactions&tx=e1")
+    );
+    assert_eq!(ev.params["entry_description"], "Tiền điện");
     assert_eq!(ev.params["excerpt"], "looks good");
 }
 
 #[test]
 fn commenting_on_your_own_entry_alone_notifies_nobody() {
-    let ev = comment_added_event("b1", "e1", "u1", vec!["u1".into()], "note to self");
+    let ev = comment_added_event("b1", "e1", "", "u1", vec!["u1".into()], "note to self");
     assert!(!ev.has_recipients());
 }
 
@@ -37,7 +42,7 @@ fn excerpt_is_cut_on_a_character_boundary() {
 
 #[test]
 fn publish_request_uses_the_group_key() {
-    let ev = comment_added_event("b1", "e1", "u2", vec!["u1".into()], "hi");
+    let ev = comment_added_event("b1", "e1", "", "u2", vec!["u1".into()], "hi");
     let r = to_publish_request(&ev);
     assert_eq!(r.group_key, "entry_comment:e1");
     assert_eq!(r.category, 1); // ACTIVITY
